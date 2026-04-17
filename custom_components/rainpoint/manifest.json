@@ -1,0 +1,15 @@
+{
+  "domain": "rainpoint",
+  "name": "RainPoint Smart+",
+  "version": "0.1.0",
+  "config_flow": true,
+  "documentation": "https://github.com/rathga/rainpoint-ha",
+  "issue_tracker": "https://github.com/rathga/rainpoint-ha/issues",
+  "codeowners": ["@rathga"],
+  "iot_class": "cloud_polling",
+  "requirements": [
+    "homgarapi @ git+https://github.com/rathga/homgarapi@hwg023-control-and-model288"
+  ],
+  "dependencies": [],
+  "integration_type": "hub"
+}

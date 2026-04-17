@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "RainPoint Smart+",
+        "description": "Sign in with a HomGar/RainPoint account. Use a dedicated sub-account invited to your home — logging in with your main account will kick it off its phones.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "area_code": "Area code (UK = 44, US = 1, NL = 31)"
+        }
+      }
+    },
+    "error": {
+      "auth": "Authentication failed — check the email, password and area code.",
+      "unknown": "Unexpected error, see the log."
+    },
+    "abort": {
+      "already_configured": "This account is already configured."
+    }
+  }
+}
