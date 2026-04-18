@@ -25,7 +25,7 @@ from homgarapi.devices import RainPoint2ZoneTimer_V2
 from .const import (
     DEFAULT_RUN_MINUTES,
     DOMAIN,
-    MAX_RUN_MINUTES,
+    MAX_SLIDER_MINUTES,
     MIN_RUN_MINUTES,
 )
 from .coordinator import RainPointCoordinator
@@ -50,7 +50,7 @@ class ZoneRunMinutesNumber(RestoreNumber):
 
     _attr_has_entity_name = True
     _attr_native_min_value = MIN_RUN_MINUTES
-    _attr_native_max_value = MAX_RUN_MINUTES
+    _attr_native_max_value = MAX_SLIDER_MINUTES
     _attr_native_step = 1
     _attr_mode = NumberMode.SLIDER
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES

@@ -15,12 +15,12 @@ run_zone:
           domain: switch
     duration:
       name: Duration
-      description: Run duration in minutes (1–120).
+      description: Run duration in minutes (1–720 — i.e. up to 12 h).
       required: true
       selector:
         number:
           min: 1
-          max: 120
+          max: 720
           step: 1
           unit_of_measurement: min
           mode: box

@@ -20,9 +20,14 @@ MIN_RUN_SECONDS = 60           # server accepts lower but app enforces 60 to pro
 COOLDOWN_SECONDS = 15          # match the phone app (10-15 s observed lockout after any control)
 
 # Per-zone ``number.*_run_minutes`` slider bounds.
+# Kept at 120 because a 1-720 linear slider would be unusable for
+# picking the typical 5-30 min range. Long soaks go through the
+# rainpoint.run_zone service instead, whose cap is MAX_RUN_MINUTES.
 MIN_RUN_MINUTES = 1
-MAX_RUN_MINUTES = 120
+MAX_SLIDER_MINUTES = 120
 DEFAULT_RUN_MINUTES = 5
+# Hard cap for any run (phone app also enforces this upper bound).
+MAX_RUN_MINUTES = 720
 
 # Custom service name: rainpoint.run_zone(entity_id, duration)
 SERVICE_RUN_ZONE = "run_zone"
