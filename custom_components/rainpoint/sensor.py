@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from homeassistant.components.sensor import (
@@ -17,8 +17,9 @@ from homeassistant.const import (
     UnitOfLength,
     UnitOfVolume,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homgarapi.devices import (
@@ -44,6 +45,7 @@ async def async_setup_entry(
                 for port in (1, 2):
                     entities.append(TimerLastUsageSensor(coord, hub, sub, port))
                     entities.append(ZoneRunsUntilSensor(coord, hub, sub, port))
+                    entities.append(ZoneRemainingSensor(coord, hub, sub, port))
             elif isinstance(sub, RainPointRainSensor):
                 entities.append(RainfallTotalSensor(coord, hub, sub))
                 entities.append(RainfallHourSensor(coord, hub, sub))
@@ -120,6 +122,56 @@ class ZoneRunsUntilSensor(_BaseSub):
     @property
     def native_value(self) -> Optional[datetime]:
         return self.coordinator.runs_until(self._sub.sid, self._port)
+
+
+class ZoneRemainingSensor(_BaseSub):
+    """Live mm:ss countdown, ticking every second while a zone runs.
+
+    Same source-of-truth as ``ZoneRunsUntilSensor`` (the coordinator's
+    ``runs_until`` stamp) but formatted as ``"MM:SS"`` so dashboards can
+    show an always-visible live counter without relying on HA's native
+    relative-timestamp formatting (which only shows seconds inside the
+    last minute). Idle → ``None`` → renders as "unknown" in cards; the
+    intended use is inside a conditional card that only appears while
+    the zone is running.
+    """
+
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, coordinator, hub, sub, port: int):
+        super().__init__(coordinator, hub, sub)
+        self._port = port
+        self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_remaining"
+        self._attr_name = f"{sub.port_label(port)} remaining"
+        self._unsub_tick = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsub_tick = async_track_time_interval(
+            self.hass, self._tick, timedelta(seconds=1)
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._unsub_tick is not None:
+            self._unsub_tick()
+            self._unsub_tick = None
+        await super().async_will_remove_from_hass()
+
+    @callback
+    def _tick(self, _now) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> Optional[str]:
+        end = self.coordinator.runs_until(self._sub.sid, self._port)
+        if end is None:
+            return None
+        remaining = (end - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            return None
+        mm = int(remaining // 60)
+        ss = int(remaining % 60)
+        return f"{mm:02d}:{ss:02d}"
 
 
 class RainfallBase(_BaseSub):
