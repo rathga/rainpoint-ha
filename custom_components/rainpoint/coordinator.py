@@ -119,20 +119,30 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         return self._hubs
 
     def _observe_port(self, sid: int, port_num: int, port, now: datetime) -> None:
-        """Detect idle->running transitions and stamp the expected end time.
+        """Reconcile per-port bookkeeping from a fresh poll.
 
-        We only stamp when we actually observe the transition: a port that's
-        already running on our very first poll (``prev is None``) stays with
-        ``runs_until = None`` until it cycles idle and restarts — we don't
-        know when it actually began, and a guess would be worse than
-        admitting it.
+        Stamps ``runs_until`` when we have no existing stamp and the port
+        is reported running:
+
+        * First poll after HA start (``prev is None``): best-effort —
+          we don't know when it actually started, but ``duration_s``
+          gives an upper bound that's much better than "unknown".
+        * Observed idle->running transition (``prev is False``): a
+          genuine fresh start (e.g. via the phone app).
+
+        If the coordinator already has a ``runs_until`` for this key
+        (e.g. stamped by an HA-initiated optimistic update), we leave
+        it alone — otherwise we'd overwrite an accurate stamp with a
+        device-reported duration that's usually the original run
+        length, not the remaining time.
         """
         key = (sid, port_num)
         prev = self._prev_running.get(key)
         is_running = port.running
-        if is_running and prev is False and port.duration_s:
-            self._runs_until[key] = now + timedelta(seconds=int(port.duration_s))
-        elif not is_running:
+        if is_running:
+            if key not in self._runs_until and port.duration_s:
+                self._runs_until[key] = now + timedelta(seconds=int(port.duration_s))
+        else:
             self._runs_until.pop(key, None)
         self._prev_running[key] = is_running
 
@@ -185,7 +195,15 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
     ) -> None:
         """Mirror what we expect control_zone to do, on the local device
         tree + coordinator bookkeeping, so UI updates don't have to wait
-        for the next poll."""
+        for the next poll.
+
+        For ``MODE_OFF`` we only flip the local ``wkstate`` to idle —
+        we deliberately don't clear ``_runs_until`` or ``_prev_running``.
+        HomGar's control endpoint has a ~60 s rate limit on stop-after-
+        start, so a "stop" command may fail or be deferred; if the next
+        poll comes back with the valve still running we want to preserve
+        the existing countdown rather than treat it as a fresh start.
+        """
         port = sub.ports.get(port_num) if hasattr(sub, "ports") else None
         if port is None:
             return
@@ -199,8 +217,6 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             self._prev_running[key] = True
         elif mode == MODE_OFF:
             port.wkstate = 0
-            self._runs_until.pop(key, None)
-            self._prev_running[key] = False
 
     async def async_turn_on(self, sub, port: int, duration: int) -> None:
         await self.async_control(sub, port, MODE_MANUAL, duration)
