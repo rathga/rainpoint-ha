@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homgarapi.devices import (
     HomgarHubDevice,
     RainPoint2ZoneTimer_V2,
+    RainPointDisplayHubV2,
     RainPointRainSensor,
 )
 
@@ -39,6 +40,8 @@ async def async_setup_entry(
     coord: RainPointCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities: List[SensorEntity] = []
     for hub in coord.hubs:
+        if isinstance(hub, RainPointDisplayHubV2):
+            entities.append(HubWifiRssiSensor(coord, hub))
         for sub in hub.subdevices:
             if isinstance(sub, RainPoint2ZoneTimer_V2):
                 entities.append(TimerRssiSensor(coord, hub, sub))
@@ -51,6 +54,7 @@ async def async_setup_entry(
                 entities.append(RainfallTotalSensor(coord, hub, sub))
                 entities.append(RainfallHourSensor(coord, hub, sub))
                 entities.append(RainfallDaySensor(coord, hub, sub))
+                entities.append(RainfallWeekSensor(coord, hub, sub))
     async_add_entities(entities)
 
 
@@ -252,3 +256,41 @@ class RainfallDaySensor(RainfallBase):
     @property
     def native_value(self) -> Optional[float]:
         return getattr(self._sub, "rainfall_mm_daily", None)
+
+
+class RainfallWeekSensor(RainfallBase):
+    def __init__(self, coordinator, hub, sub):
+        super().__init__(coordinator, hub, sub)
+        self._attr_unique_id = f"rainpoint_{sub.sid}_rain_7d"
+        self._attr_name = "Rainfall 7d"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        return getattr(self._sub, "rainfall_mm_7days", None)
+
+
+class HubWifiRssiSensor(CoordinatorEntity, SensorEntity):
+    """Wi-Fi RSSI of the hub itself (as opposed to the RF-to-sub RSSI,
+    which lives on each sub-device).
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = "diagnostic"
+
+    def __init__(self, coordinator, hub):
+        super().__init__(coordinator)
+        self._hub = hub
+        self._attr_unique_id = f"rainpoint_hub_{hub.mid}_wifi_rssi"
+        self._attr_name = "Wi-Fi RSSI"
+
+    @property
+    def device_info(self):
+        from .entity import hub_device_info
+        return hub_device_info(self._hub)
+
+    @property
+    def native_value(self) -> Optional[int]:
+        return getattr(self._hub, "wifi_rssi", None)

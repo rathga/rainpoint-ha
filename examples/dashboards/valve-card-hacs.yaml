@@ -1,0 +1,107 @@
+# RainPoint valve card — polished HACS-backed version.
+#
+# Two HACS frontend plugins required:
+#   - decluttering-card  (HACS → Frontend → "Decluttering Card")
+#     https://github.com/custom-cards/decluttering-card
+#   - button-card        (HACS → Frontend → "button-card")
+#     https://github.com/custom-cards/button-card
+#
+# A single template in decluttering_templates is instantiated once per
+# zone in the view. Swap the variable block to add more zones or rename
+# them. The cooldown countdown is embedded in the RUN/STOP button label
+# and the button is dimmed+disabled while the cooldown is active.
+#
+# For the built-in-cards-only version, see valve-card.yaml in the same
+# directory.
+#
+# Paste the whole file into Dashboard → ⋯ → Edit → ⋯ → Raw configuration
+# editor. The `decluttering_templates:` block needs to live at the
+# top level of the dashboard config (sibling of `views:`), not inside
+# a view.
+
+decluttering_templates:
+  rainpoint_valve_card:
+    default:
+      - title: Zone
+      - slug: sprinklers
+    card:
+      type: entities
+      title: "[[title]]"
+      state_color: true
+      entities:
+        - entity: sensor.htv213frf_[[slug]]_last_cycle_usage
+          name: Last cycle usage
+
+        # Idle: duration slider row
+        - type: conditional
+          conditions:
+            - entity: switch.htv213frf_[[slug]]
+              state: "off"
+          row:
+            entity: number.htv213frf_[[slug]]_run_minutes
+            name: Run for
+
+        # Running: mm:ss countdown row
+        - type: conditional
+          conditions:
+            - entity: switch.htv213frf_[[slug]]
+              state: "on"
+          row:
+            entity: sensor.htv213frf_[[slug]]_remaining
+            name: Running...
+
+        # Action button — single custom:button-card that re-labels
+        # itself between "RUN", "STOP", or "Cooldown Xs" and dims
+        # while the cooldown sensor is non-zero.
+        - type: custom:button-card
+          entity: switch.htv213frf_[[slug]]
+          show_icon: false
+          show_state: false
+          name: |
+            [[[
+              const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
+              if (cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable') {
+                return 'Cooldown ' + cd.state + 's';
+              }
+              return entity.state === 'on' ? 'STOP' : 'RUN';
+            ]]]
+          tap_action:
+            action: call-service
+            service: |
+              [[[ return entity.state === 'on' ? 'switch.turn_off' : 'switch.turn_on'; ]]]
+            service_data:
+              entity_id: switch.htv213frf_[[slug]]
+          styles:
+            card:
+              - height: 52px
+              - font-size: 16px
+              - font-weight: 600
+              - letter-spacing: 1px
+              - border-radius: 0
+              - margin: 0
+              - box-shadow: none
+          state:
+            - operator: template
+              value: >
+                [[[
+                  const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
+                  return cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable';
+                ]]]
+              styles:
+                card:
+                  - pointer-events: none
+                  - opacity: 0.5
+
+views:
+  - title: Irrigation
+    cards:
+      - type: custom:decluttering-card
+        template: rainpoint_valve_card
+        variables:
+          - title: Sprinklers
+          - slug: sprinklers
+      - type: custom:decluttering-card
+        template: rainpoint_valve_card
+        variables:
+          - title: Dripline
+          - slug: dripline
