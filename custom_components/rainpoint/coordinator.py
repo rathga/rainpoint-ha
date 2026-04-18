@@ -65,6 +65,13 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         # seen this port yet" — used to suppress stamping a run_until
         # for a port that was already running when HA first came up.
         self._prev_running: Dict[Tuple[int, int], Optional[bool]] = {}
+        # Grace period: while a fresh HA-initiated control command is
+        # propagating through HomGar's relay (control endpoint accepts
+        # fast, but valve state in /getDeviceStatus takes 10-20 s to
+        # catch up), we force the poll-reported wkstate to whatever we
+        # just commanded. Without this the first poll after a RUN comes
+        # back ``wkstate=0`` and the switch flips back to off mid-run.
+        self._grace: Dict[Tuple[int, int], Tuple[datetime, int]] = {}
 
     # ------------------------------------------------------------------
     # Option-backed values with safe defaults when no entry is supplied.
@@ -109,6 +116,7 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             for sub in hub.subdevices:
                 if isinstance(sub, RainPoint2ZoneTimer_V2):
                     for port_num, port in sub.ports.items():
+                        self._apply_grace(sub.sid, port_num, port, now)
                         self._observe_port(sub.sid, port_num, port, now)
                         if port.running:
                             any_running = True
@@ -117,6 +125,24 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         idle = timedelta(seconds=self.poll_idle_s)
         self.update_interval = active if any_running else idle
         return self._hubs
+
+    def _apply_grace(self, sid: int, port_num: int, port, now: datetime) -> None:
+        """Force poll-reported wkstate back to what we optimistically
+        commanded, for a short window after an HA-initiated control.
+
+        HomGar accepts the command fast but takes 10-20 s to update
+        ``/getDeviceStatus``. Without this, the very next poll flips
+        the switch back to off mid-run (or on, for a stop).
+        """
+        key = (sid, port_num)
+        pending = self._grace.get(key)
+        if pending is None:
+            return
+        expires, wkstate = pending
+        if now >= expires:
+            self._grace.pop(key, None)
+            return
+        port.wkstate = wkstate
 
     def _observe_port(self, sid: int, port_num: int, port, now: datetime) -> None:
         """Reconcile per-port bookkeeping from a fresh poll.
@@ -197,26 +223,30 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         tree + coordinator bookkeeping, so UI updates don't have to wait
         for the next poll.
 
-        For ``MODE_OFF`` we only flip the local ``wkstate`` to idle —
-        we deliberately don't clear ``_runs_until`` or ``_prev_running``.
-        HomGar's control endpoint has a ~60 s rate limit on stop-after-
-        start, so a "stop" command may fail or be deferred; if the next
-        poll comes back with the valve still running we want to preserve
-        the existing countdown rather than treat it as a fresh start.
+        The grace-window entry in ``_grace`` lets ``_apply_grace`` pin
+        the commanded wkstate across the following ~30 s of polls
+        (HomGar's relay takes that long to reflect the new state).
         """
         port = sub.ports.get(port_num) if hasattr(sub, "ports") else None
         if port is None:
             return
         key = (getattr(sub, "sid", None), port_num)
         now = datetime.now(timezone.utc)
+        grace_until = now + timedelta(seconds=30)
         if mode == MODE_MANUAL:
             # wkstate bit 0 = running, bit 5 = manual (0x21 = 33).
             port.wkstate = 0x21
             port.duration_s = int(duration)
             self._runs_until[key] = now + timedelta(seconds=int(duration))
             self._prev_running[key] = True
+            self._grace[key] = (grace_until, 0x21)
         elif mode == MODE_OFF:
             port.wkstate = 0
+            # Shorter grace for STOP — HomGar either accepts it quickly
+            # or rejects it outright (rate-limit code 4). If rejected,
+            # we'd rather the UI flip back to "running" promptly than
+            # keep lying to the user.
+            self._grace[key] = (now + timedelta(seconds=5), 0)
 
     async def async_turn_on(self, sub, port: int, duration: int) -> None:
         await self.async_control(sub, port, MODE_MANUAL, duration)
