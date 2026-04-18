@@ -13,6 +13,7 @@ from typing import Any, List
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -79,8 +80,30 @@ class RainPointZoneSwitch(CoordinatorEntity, SwitchEntity):
             "wkstate": s.wkstate,
         }
 
+    def _run_duration_s(self) -> int:
+        """Pick the duration to send when the switch is flipped on.
+
+        Priority: (1) caller-supplied ``duration`` kwarg in seconds,
+        (2) the companion ``number.<zone>_run_minutes`` slider state,
+        (3) the integration-level default (options flow).
+        """
+        num_unique_id = f"rainpoint_{self._sub.sid}_port{self._port}_run_minutes"
+        reg = er.async_get(self.hass)
+        num_entity_id = reg.async_get_entity_id("number", DOMAIN, num_unique_id)
+        if num_entity_id:
+            state = self.hass.states.get(num_entity_id)
+            if state and state.state not in (None, "unknown", "unavailable"):
+                try:
+                    return max(1, int(round(float(state.state) * 60)))
+                except (TypeError, ValueError):
+                    pass
+        return self.coordinator.default_duration_s
+
     async def async_turn_on(self, **kwargs: Any) -> None:
-        duration = int(kwargs.get("duration", self.coordinator.default_duration_s))
+        if "duration" in kwargs:
+            duration = int(kwargs["duration"])
+        else:
+            duration = self._run_duration_s()
         await self.coordinator.async_turn_on(self._sub, self._port, duration)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
