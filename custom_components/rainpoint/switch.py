@@ -13,6 +13,7 @@ from typing import Any, List
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -99,7 +100,15 @@ class RainPointZoneSwitch(CoordinatorEntity, SwitchEntity):
                     pass
         return self.coordinator.default_duration_s
 
+    def _enforce_cooldown(self) -> None:
+        remaining = self.coordinator.cooldown_remaining_s(self._sub.sid, self._port)
+        if remaining > 0:
+            raise HomeAssistantError(
+                f"{self._attr_name}: valve cooling down, try again in {remaining} s"
+            )
+
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._enforce_cooldown()
         if "duration" in kwargs:
             duration = int(kwargs["duration"])
         else:
@@ -107,4 +116,5 @@ class RainPointZoneSwitch(CoordinatorEntity, SwitchEntity):
         await self.coordinator.async_turn_on(self._sub, self._port, duration)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        self._enforce_cooldown()
         await self.coordinator.async_turn_off(self._sub, self._port)

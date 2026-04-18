@@ -17,6 +17,7 @@ DEFAULT_DURATION_S = 300       # 5 min — fallback when no per-zone number is s
 DEFAULT_POLL_IDLE_S = 30
 DEFAULT_POLL_ACTIVE_S = 5
 MIN_RUN_SECONDS = 60           # server accepts lower but app enforces 60 to protect hardware
+COOLDOWN_SECONDS = 15          # match the phone app (10-15 s observed lockout after any control)
 
 # Per-zone ``number.*_run_minutes`` slider bounds.
 MIN_RUN_MINUTES = 1

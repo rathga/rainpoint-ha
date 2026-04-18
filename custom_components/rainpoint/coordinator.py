@@ -19,6 +19,7 @@ from .const import (
     CONF_DEFAULT_DURATION,
     CONF_POLL_ACTIVE,
     CONF_POLL_IDLE,
+    COOLDOWN_SECONDS,
     DEFAULT_DURATION_S,
     DEFAULT_POLL_ACTIVE_S,
     DEFAULT_POLL_IDLE_S,
@@ -72,6 +73,10 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         # just commanded. Without this the first poll after a RUN comes
         # back ``wkstate=0`` and the switch flips back to off mid-run.
         self._grace: Dict[Tuple[int, int], Tuple[datetime, int]] = {}
+        # Cooldown: timestamp of the last control command per port.
+        # Blocks further control for COOLDOWN_SECONDS — matches the
+        # phone app's ~10-15 s lockout after any start/stop.
+        self._last_command_at: Dict[Tuple[int, int], datetime] = {}
 
     # ------------------------------------------------------------------
     # Option-backed values with safe defaults when no entry is supplied.
@@ -191,6 +196,18 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         when we weren't watching at the moment it started."""
         return self._runs_until.get((sid, port_num))
 
+    def cooldown_remaining_s(self, sid: int, port_num: int) -> int:
+        """Seconds until the user can issue another control for this port.
+
+        0 once the window has passed (or no command has ever fired).
+        """
+        last = self._last_command_at.get((sid, port_num))
+        if last is None:
+            return 0
+        elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+        remaining = COOLDOWN_SECONDS - elapsed
+        return max(0, int(remaining + 0.999))  # round up so a 0.3 s remainder still reads as 1 s
+
     async def async_control(
         self, sub, port: int, mode: int, duration: int
     ) -> None:
@@ -232,6 +249,8 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             return
         key = (getattr(sub, "sid", None), port_num)
         now = datetime.now(timezone.utc)
+        # Any control command (RUN or STOP) starts the cooldown window.
+        self._last_command_at[key] = now
         grace_until = now + timedelta(seconds=30)
         if mode == MODE_MANUAL:
             # wkstate bit 0 = running, bit 5 = manual (0x21 = 33).

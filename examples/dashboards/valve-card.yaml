@@ -1,24 +1,20 @@
 # RainPoint valve card — one built-in entities card per zone, no HACS.
 #
-# Everything lives as rows inside a single `entities` card — including
-# the state-dependent content, via `type: conditional` rows. Result: one
-# card, one border, no internal dividers between areas.
-#
-# Trade-off: rows are vertically stacked, so the slider sits above the
-# RUN button rather than beside it. If you want horizontal "slider +
-# button" inside a truly borderless card, that requires the HACS plugin
-# `card-mod` to strip nested-card backgrounds — ask and I'll ship that
-# variant too.
+# Three states rendered via `type: conditional` rows:
+#   - idle:      last-cycle usage + slider + RUN button
+#   - running:   last-cycle usage + mm:ss countdown + STOP button
+#   - cooldown:  (either state above) + a "Cooldown Xs" row instead of
+#                the RUN/STOP button. Matches the ~15 s lockout the
+#                phone app imposes after any control command.
 
 type: entities
 title: Sprinklers
 state_color: true
 entities:
-  # --- Always visible -----------------------------------------------
   - entity: sensor.htv213frf_sprinklers_last_cycle_usage
     name: Last cycle usage
 
-  # --- Idle rows ----------------------------------------------------
+  # --- Idle: slider is always shown ---------------------------------
   - type: conditional
     conditions:
       - entity: switch.htv213frf_sprinklers
@@ -26,10 +22,32 @@ entities:
     row:
       entity: number.htv213frf_sprinklers_run_minutes
       name: Run for
+
+  # --- Running: live countdown always shown -------------------------
+  - type: conditional
+    conditions:
+      - entity: switch.htv213frf_sprinklers
+        state: "on"
+    row:
+      entity: sensor.htv213frf_sprinklers_remaining
+      name: Running...
+
+  # --- Action button, or a cooldown-countdown row --------------------
+  # Cooldown takes priority when active, replacing the RUN/STOP button.
+  - type: conditional
+    conditions:
+      - entity: sensor.htv213frf_sprinklers_cooldown
+        state_not: "0"
+    row:
+      entity: sensor.htv213frf_sprinklers_cooldown
+      name: Cooldown
+
   - type: conditional
     conditions:
       - entity: switch.htv213frf_sprinklers
         state: "off"
+      - entity: sensor.htv213frf_sprinklers_cooldown
+        state: "0"
     row:
       type: call-service
       name: " "
@@ -38,24 +56,16 @@ entities:
       service_data:
         entity_id: switch.htv213frf_sprinklers
 
-  # --- Running rows -------------------------------------------------
   - type: conditional
     conditions:
       - entity: switch.htv213frf_sprinklers
         state: "on"
+      - entity: sensor.htv213frf_sprinklers_cooldown
+        state: "0"
     row:
-      entity: sensor.htv213frf_sprinklers_remaining
-      name: Running...
-  - type: conditional
-    conditions:
-      - entity: switch.htv213frf_sprinklers
-        state: "on"
-    row:
-      type: button
+      type: call-service
       name: " "
       action_name: STOP
-      tap_action:
-        action: call-service
-        service: switch.turn_off
-        target:
-          entity_id: switch.htv213frf_sprinklers
+      service: switch.turn_off
+      service_data:
+        entity_id: switch.htv213frf_sprinklers

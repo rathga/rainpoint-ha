@@ -46,6 +46,7 @@ async def async_setup_entry(
                     entities.append(TimerLastUsageSensor(coord, hub, sub, port))
                     entities.append(ZoneRunsUntilSensor(coord, hub, sub, port))
                     entities.append(ZoneRemainingSensor(coord, hub, sub, port))
+                    entities.append(ZoneCooldownSensor(coord, hub, sub, port))
             elif isinstance(sub, RainPointRainSensor):
                 entities.append(RainfallTotalSensor(coord, hub, sub))
                 entities.append(RainfallHourSensor(coord, hub, sub))
@@ -122,6 +123,45 @@ class ZoneRunsUntilSensor(_BaseSub):
     @property
     def native_value(self) -> Optional[datetime]:
         return self.coordinator.runs_until(self._sub.sid, self._port)
+
+
+class ZoneCooldownSensor(_BaseSub):
+    """Seconds until the next RUN/STOP command is allowed for this port.
+
+    Matches the phone app's ~10-15 s lockout after any control command.
+    Ticks down every second; 0 means no cooldown in effect.
+    """
+
+    _attr_icon = "mdi:timer-sand-paused"
+    _attr_native_unit_of_measurement = "s"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, hub, sub, port: int):
+        super().__init__(coordinator, hub, sub)
+        self._port = port
+        self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_cooldown"
+        self._attr_name = f"{sub.port_label(port)} cooldown"
+        self._unsub_tick = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsub_tick = async_track_time_interval(
+            self.hass, self._tick, timedelta(seconds=1)
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._unsub_tick is not None:
+            self._unsub_tick()
+            self._unsub_tick = None
+        await super().async_will_remove_from_hass()
+
+    @callback
+    def _tick(self, _now) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.cooldown_remaining_s(self._sub.sid, self._port)
 
 
 class ZoneRemainingSensor(_BaseSub):
