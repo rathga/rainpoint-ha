@@ -17,6 +17,7 @@ from homgarapi.devices import RainPoint2ZoneTimer_V2
 
 from .const import DOMAIN
 from .coordinator import RainPointCoordinator
+from .entity import sub_device_info
 
 
 async def async_setup_entry(
@@ -42,17 +43,11 @@ class ZoneRunningBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._sub = sub
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_running"
-        self._attr_name = f"Port {port} running"
+        self._attr_name = f"{sub.port_label(port)} running"
 
     @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers": {(DOMAIN, f"sub-{self._sub.sid}")},
-            "name": self._sub.name,
-            "model": self._sub.model,
-            "via_device": (DOMAIN, f"hub-{self._hub.mid}"),
-            "manufacturer": "RainPoint",
-        }
+    def device_info(self):
+        return sub_device_info(self._hub, self._sub)
 
     @property
     def is_on(self) -> bool:

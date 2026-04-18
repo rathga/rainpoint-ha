@@ -28,6 +28,7 @@ from homgarapi.devices import (
 
 from .const import DOMAIN
 from .coordinator import RainPointCoordinator
+from .entity import sub_device_info
 
 
 async def async_setup_entry(
@@ -57,14 +58,8 @@ class _BaseSub(CoordinatorEntity, SensorEntity):
         self._sub = sub
 
     @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers": {(DOMAIN, f"sub-{self._sub.sid}")},
-            "name": self._sub.name,
-            "model": self._sub.model,
-            "via_device": (DOMAIN, f"hub-{self._hub.mid}"),
-            "manufacturer": "RainPoint",
-        }
+    def device_info(self):
+        return sub_device_info(self._hub, self._sub)
 
 
 class TimerRssiSensor(_BaseSub):
@@ -91,7 +86,7 @@ class TimerLastUsageSensor(_BaseSub):
         super().__init__(coordinator, hub, sub)
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_last_usage"
-        self._attr_name = f"Port {port} last-cycle usage"
+        self._attr_name = f"{sub.port_label(port)} last-cycle usage"
 
     @property
     def native_value(self) -> Optional[float]:

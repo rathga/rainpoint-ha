@@ -18,8 +18,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homgarapi.devices import HomgarHubDevice, RainPoint2ZoneTimer_V2
 
-from .const import DEFAULT_DURATION_S, DOMAIN
+from .const import DOMAIN
 from .coordinator import RainPointCoordinator
+from .entity import sub_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,20 +55,12 @@ class RainPointZoneSwitch(CoordinatorEntity, SwitchEntity):
         self._sub = sub
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}"
-        # "Sprinklers" / "Dripline" comes from the API's portDescribe on the
-        # sub-device, accessed via get_devices_for_hid payload — we don't
-        # currently surface it on the device object, so fall back to "Port N".
-        self._attr_name = f"Port {port}"
+        # e.g. "Sprinklers" / "Dripline" from the API's portDescribe field.
+        self._attr_name = sub.port_label(port)
 
     @property
-    def device_info(self) -> dict:
-        return {
-            "identifiers": {(DOMAIN, f"sub-{self._sub.sid}")},
-            "name": self._sub.name,
-            "model": self._sub.model,
-            "via_device": (DOMAIN, f"hub-{self._hub.mid}"),
-            "manufacturer": "RainPoint",
-        }
+    def device_info(self):
+        return sub_device_info(self._hub, self._sub)
 
     @property
     def is_on(self) -> bool:
@@ -87,7 +80,7 @@ class RainPointZoneSwitch(CoordinatorEntity, SwitchEntity):
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        duration = int(kwargs.get("duration", DEFAULT_DURATION_S))
+        duration = int(kwargs.get("duration", self.coordinator.default_duration_s))
         await self.coordinator.async_turn_on(self._sub, self._port, duration)
 
     async def async_turn_off(self, **kwargs: Any) -> None:

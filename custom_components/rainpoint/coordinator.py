@@ -11,13 +11,21 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homgarapi.api import HomgarApi, HomgarApiException
 from homgarapi.devices import HomgarHubDevice, RainPoint2ZoneTimer_V2
 
+from datetime import timedelta
+
+from homeassistant.config_entries import ConfigEntry
+
 from .const import (
+    CONF_DEFAULT_DURATION,
+    CONF_POLL_ACTIVE,
+    CONF_POLL_IDLE,
+    DEFAULT_DURATION_S,
+    DEFAULT_POLL_ACTIVE_S,
+    DEFAULT_POLL_IDLE_S,
     DOMAIN,
     MIN_RUN_SECONDS,
     MODE_MANUAL,
     MODE_OFF,
-    POLL_INTERVAL_ACTIVE,
-    POLL_INTERVAL_IDLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,21 +34,50 @@ _LOGGER = logging.getLogger(__name__)
 class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
     """Pulls the device tree + status from HomGar cloud, at a variable cadence."""
 
-    def __init__(self, hass: HomeAssistant, email: str, password: str, area_code: str):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        email: str,
+        password: str,
+        area_code: str,
+        entry: ConfigEntry | None = None,
+    ):
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=POLL_INTERVAL_IDLE,
+            update_interval=timedelta(seconds=DEFAULT_POLL_IDLE_S),
         )
         self.email = email
         self.password = password
         self.area_code = area_code
+        self.entry = entry
         self._cache: dict = {}
         self._api: HomgarApi = HomgarApi(auth_cache=self._cache)
         # Full tree, refreshed when we see device-tree-changing events.
         self._hubs: List[HomgarHubDevice] = []
         self._tree_loaded = False
+
+    # ------------------------------------------------------------------
+    # Option-backed values with safe defaults when no entry is supplied.
+
+    @property
+    def default_duration_s(self) -> int:
+        if self.entry is None:
+            return DEFAULT_DURATION_S
+        return self.entry.options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_S)
+
+    @property
+    def poll_idle_s(self) -> int:
+        if self.entry is None:
+            return DEFAULT_POLL_IDLE_S
+        return self.entry.options.get(CONF_POLL_IDLE, DEFAULT_POLL_IDLE_S)
+
+    @property
+    def poll_active_s(self) -> int:
+        if self.entry is None:
+            return DEFAULT_POLL_ACTIVE_S
+        return self.entry.options.get(CONF_POLL_ACTIVE, DEFAULT_POLL_ACTIVE_S)
 
     async def _async_update_data(self) -> List[HomgarHubDevice]:
         try:
@@ -66,7 +103,9 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
                         if port.running:
                             any_running = True
         # Adaptive cadence: faster while a zone runs so state flips are quick.
-        self.update_interval = POLL_INTERVAL_ACTIVE if any_running else POLL_INTERVAL_IDLE
+        active = timedelta(seconds=self.poll_active_s)
+        idle = timedelta(seconds=self.poll_idle_s)
+        self.update_interval = active if any_running else idle
         return self._hubs
 
     # ------------------------------------------------------------------

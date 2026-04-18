@@ -27,6 +27,11 @@ STEP_USER_SCHEMA = vol.Schema({
 class RainPointConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
+    @staticmethod
+    def async_get_options_flow(entry):
+        from .options_flow import RainPointOptionsFlow
+        return RainPointOptionsFlow(entry)
+
     async def async_step_user(self, user_input: Dict[str, Any] | None = None) -> FlowResult:
         errors: Dict[str, str] = {}
         if user_input is not None:
