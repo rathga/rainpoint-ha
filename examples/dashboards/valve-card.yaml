@@ -32,8 +32,7 @@ entities:
         state: "off"
     row:
       type: button
-      name: Run now
-      icon: mdi:play-circle
+      name: " "
       action_name: RUN
       tap_action:
         action: call-service
@@ -55,8 +54,7 @@ entities:
         state: "on"
     row:
       type: button
-      name: Cancel
-      icon: mdi:stop-circle
+      name: " "
       action_name: STOP
       tap_action:
         action: call-service
