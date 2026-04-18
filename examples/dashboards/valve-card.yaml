@@ -1,0 +1,58 @@
+# RainPoint valve card — one card per zone, with two conditional views.
+#
+# Paste into a Dashboard via "Add card → Manual" and edit the entity ids
+# to match your install (see Developer Tools → States, filter "rainpoint").
+#
+# Idle view:   last cycle usage + duration slider + RUN button.
+# Running view: countdown + STOP button.
+#
+# The switch is the source of truth — HA's `switch.turn_on` reads the
+# companion `number.*_run_minutes` slider and fires control_zone(manual,
+# duration). The runs_until sensor is a `device_class: timestamp` so HA
+# renders it natively as "in 4 min".
+
+type: vertical-stack
+cards:
+  - type: conditional
+    conditions:
+      - entity: switch.htv213frf_sprinklers
+        state: "off"
+    card:
+      type: entities
+      title: Sprinklers
+      state_color: true
+      entities:
+        - entity: sensor.htv213frf_sprinklers_last_cycle_usage
+          name: Last cycle usage
+        - entity: number.htv213frf_sprinklers_run_minutes
+          name: Run for
+        - type: button
+          name: Run now
+          icon: mdi:play-circle
+          action_name: RUN
+          tap_action:
+            action: call-service
+            service: switch.turn_on
+            target:
+              entity_id: switch.htv213frf_sprinklers
+
+  - type: conditional
+    conditions:
+      - entity: switch.htv213frf_sprinklers
+        state: "on"
+    card:
+      type: entities
+      title: Sprinklers — running
+      state_color: true
+      entities:
+        - entity: sensor.htv213frf_sprinklers_runs_until
+          name: Stops
+        - type: button
+          name: Stop
+          icon: mdi:stop-circle
+          action_name: STOP
+          tap_action:
+            action: call-service
+            service: switch.turn_off
+            target:
+              entity_id: switch.htv213frf_sprinklers
