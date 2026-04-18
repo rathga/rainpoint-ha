@@ -1,7 +1,7 @@
 run_zone:
   name: Run zone
   description: >
-    Start a RainPoint zone switch for a specific duration in seconds,
+    Start a RainPoint zone switch for a specific duration in minutes,
     bypassing the companion ``number.*_run_minutes`` slider. Useful from
     scripts/automations that want explicit control.
   fields:
@@ -15,12 +15,12 @@ run_zone:
           domain: switch
     duration:
       name: Duration
-      description: Run duration in seconds (minimum 60, maximum 7200).
+      description: Run duration in minutes (1–120).
       required: true
       selector:
         number:
-          min: 60
-          max: 7200
+          min: 1
+          max: 120
           step: 1
-          unit_of_measurement: s
+          unit_of_measurement: min
           mode: box

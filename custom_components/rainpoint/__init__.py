@@ -17,7 +17,8 @@ from .const import (
     CONF_AREA_CODE,
     DEFAULT_AREA_CODE,
     DOMAIN,
-    MIN_RUN_SECONDS,
+    MAX_RUN_MINUTES,
+    MIN_RUN_MINUTES,
     PLATFORMS,
     SERVICE_RUN_ZONE,
 )
@@ -30,7 +31,7 @@ RUN_ZONE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required(ATTR_DURATION): vol.All(
-            vol.Coerce(int), vol.Range(min=MIN_RUN_SECONDS, max=7200)
+            vol.Coerce(int), vol.Range(min=MIN_RUN_MINUTES, max=MAX_RUN_MINUTES)
         ),
     }
 )
@@ -74,7 +75,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _run_zone(call: ServiceCall) -> None:
         reg = er.async_get(hass)
-        duration = int(call.data[ATTR_DURATION])
+        # Users configure in minutes; the HomGar control endpoint wants seconds.
+        duration_s = int(call.data[ATTR_DURATION]) * 60
         targets: list[tuple[RainPointCoordinator, RainPoint2ZoneTimer_V2, int]] = []
         for entity_id in call.data[ATTR_ENTITY_ID]:
             entry = reg.async_get(entity_id)
@@ -103,7 +105,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                         ):
                             targets.append((coord, sub, port))
         for coord, sub, port in targets:
-            await coord.async_turn_on(sub, port, duration)
+            await coord.async_turn_on(sub, port, duration_s)
 
     hass.services.async_register(
         DOMAIN, SERVICE_RUN_ZONE, _run_zone, schema=RUN_ZONE_SCHEMA
