@@ -158,16 +158,49 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
     async def async_control(
         self, sub, port: int, mode: int, duration: int
     ) -> None:
-        """Send a control-zone command and refresh once it lands."""
+        """Send a control-zone command.
+
+        Updates local state optimistically *before* hitting the API so
+        switch.is_on / sensor.runs_until / sensor.remaining flip
+        immediately — otherwise the UI would wait up to one poll cycle
+        (~5 s) for the device status refresh to reflect the change. The
+        next real poll reconciles; if the API call fails it'll snap
+        back on the subsequent successful poll.
+        """
         if mode == MODE_MANUAL and duration < MIN_RUN_SECONDS:
             duration = MIN_RUN_SECONDS
         hub = self.find_hub_for_sub(sub.sid)
         if hub is None:
             raise UpdateFailed(f"No hub owns sub sid={sub.sid}")
+        self._apply_optimistic(sub, port, mode, duration)
+        # Push updated state to all listeners synchronously.
+        self.async_set_updated_data(self._hubs)
         await self.hass.async_add_executor_job(
             self._api.control_zone, hub, sub.address, port, mode, duration
         )
         await self.async_request_refresh()
+
+    def _apply_optimistic(
+        self, sub, port_num: int, mode: int, duration: int
+    ) -> None:
+        """Mirror what we expect control_zone to do, on the local device
+        tree + coordinator bookkeeping, so UI updates don't have to wait
+        for the next poll."""
+        port = sub.ports.get(port_num) if hasattr(sub, "ports") else None
+        if port is None:
+            return
+        key = (getattr(sub, "sid", None), port_num)
+        now = datetime.now(timezone.utc)
+        if mode == MODE_MANUAL:
+            # wkstate bit 0 = running, bit 5 = manual (0x21 = 33).
+            port.wkstate = 0x21
+            port.duration_s = int(duration)
+            self._runs_until[key] = now + timedelta(seconds=int(duration))
+            self._prev_running[key] = True
+        elif mode == MODE_OFF:
+            port.wkstate = 0
+            self._runs_until.pop(key, None)
+            self._prev_running[key] = False
 
     async def async_turn_on(self, sub, port: int, duration: int) -> None:
         await self.async_control(sub, port, MODE_MANUAL, duration)
