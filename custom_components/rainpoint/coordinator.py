@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -11,7 +11,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homgarapi.api import HomgarApi, HomgarApiException
 from homgarapi.devices import HomgarHubDevice, RainPoint2ZoneTimer_V2
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -57,6 +57,14 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         # Full tree, refreshed when we see device-tree-changing events.
         self._hubs: List[HomgarHubDevice] = []
         self._tree_loaded = False
+        # Per-(sid, port) end timestamps, stamped on each observed
+        # idle->running transition. Cleared when the port stops. These
+        # power the ``sensor.*_runs_until`` countdown entities.
+        self._runs_until: Dict[Tuple[int, int], datetime] = {}
+        # Previous running-state per port. ``None`` means "we've never
+        # seen this port yet" — used to suppress stamping a run_until
+        # for a port that was already running when HA first came up.
+        self._prev_running: Dict[Tuple[int, int], Optional[bool]] = {}
 
     # ------------------------------------------------------------------
     # Option-backed values with safe defaults when no entry is supplied.
@@ -95,11 +103,13 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             self._hubs = hubs
             self._tree_loaded = True
         any_running = False
+        now = datetime.now(timezone.utc)
         for hub in self._hubs:
             self._api.get_device_status(hub)
             for sub in hub.subdevices:
                 if isinstance(sub, RainPoint2ZoneTimer_V2):
-                    for port in sub.ports.values():
+                    for port_num, port in sub.ports.items():
+                        self._observe_port(sub.sid, port_num, port, now)
                         if port.running:
                             any_running = True
         # Adaptive cadence: faster while a zone runs so state flips are quick.
@@ -107,6 +117,24 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         idle = timedelta(seconds=self.poll_idle_s)
         self.update_interval = active if any_running else idle
         return self._hubs
+
+    def _observe_port(self, sid: int, port_num: int, port, now: datetime) -> None:
+        """Detect idle->running transitions and stamp the expected end time.
+
+        We only stamp when we actually observe the transition: a port that's
+        already running on our very first poll (``prev is None``) stays with
+        ``runs_until = None`` until it cycles idle and restarts — we don't
+        know when it actually began, and a guess would be worse than
+        admitting it.
+        """
+        key = (sid, port_num)
+        prev = self._prev_running.get(key)
+        is_running = port.running
+        if is_running and prev is False and port.duration_s:
+            self._runs_until[key] = now + timedelta(seconds=int(port.duration_s))
+        elif not is_running:
+            self._runs_until.pop(key, None)
+        self._prev_running[key] = is_running
 
     # ------------------------------------------------------------------
     # Public helpers used by entities.
@@ -121,6 +149,11 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
                 if getattr(sub, "sid", None) == sub_sid:
                     return hub
         return None
+
+    def runs_until(self, sid: int, port_num: int) -> Optional[datetime]:
+        """End-time for a currently-running zone, or ``None`` when idle or
+        when we weren't watching at the moment it started."""
+        return self._runs_until.get((sid, port_num))
 
     async def async_control(
         self, sub, port: int, mode: int, duration: int

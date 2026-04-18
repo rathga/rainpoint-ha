@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
 from homeassistant.components.sensor import (
@@ -42,6 +43,7 @@ async def async_setup_entry(
                 entities.append(TimerRssiSensor(coord, hub, sub))
                 for port in (1, 2):
                     entities.append(TimerLastUsageSensor(coord, hub, sub, port))
+                    entities.append(ZoneRunsUntilSensor(coord, hub, sub, port))
             elif isinstance(sub, RainPointRainSensor):
                 entities.append(RainfallTotalSensor(coord, hub, sub))
                 entities.append(RainfallHourSensor(coord, hub, sub))
@@ -94,6 +96,30 @@ class TimerLastUsageSensor(_BaseSub):
         if not s or s.last_usage_dl is None:
             return None
         return s.last_usage_dl / 10.0
+
+
+class ZoneRunsUntilSensor(_BaseSub):
+    """Timestamp of when a running zone is expected to stop.
+
+    Returns ``None`` when the zone is idle, and also when we weren't
+    watching at the moment it started (e.g. HA restarted mid-run) — a
+    fresh start stamp is only recorded on observed idle->running
+    transitions. HA renders this as a relative countdown in any card
+    that knows about ``device_class: timestamp``.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(self, coordinator, hub, sub, port: int):
+        super().__init__(coordinator, hub, sub)
+        self._port = port
+        self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_runs_until"
+        self._attr_name = f"{sub.port_label(port)} runs until"
+
+    @property
+    def native_value(self) -> Optional[datetime]:
+        return self.coordinator.runs_until(self._sub.sid, self._port)
 
 
 class RainfallBase(_BaseSub):
