@@ -6,6 +6,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from homgarapi.api import HomgarApi, HomgarApiException
@@ -175,6 +176,12 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
                 self._runs_until[key] = now + timedelta(seconds=int(port.duration_s))
         else:
             self._runs_until.pop(key, None)
+        # If we just observed a state flip we didn't initiate (e.g. the
+        # phone app started or stopped the valve), start the cooldown
+        # counter so a follow-up HA tap won't slam straight into the
+        # device's own rate limit.
+        if prev is not None and prev != is_running:
+            self._last_command_at[key] = now
         self._prev_running[key] = is_running
 
     # ------------------------------------------------------------------
@@ -228,9 +235,27 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         self._apply_optimistic(sub, port, mode, duration)
         # Push updated state to all listeners synchronously.
         self.async_set_updated_data(self._hubs)
-        await self.hass.async_add_executor_job(
-            self._api.control_zone, hub, sub.address, port, mode, duration
-        )
+        try:
+            await self.hass.async_add_executor_job(
+                self._api.control_zone, hub, sub.address, port, mode, duration
+            )
+        except HomgarApiException as e:
+            # Code 4 is undocumented in HomGar's error_code_* table — the
+            # phone app would render it as "Unknown(4)". Empirically it's
+            # returned when the device-side rejects the command (busy or
+            # in transition). Surface a friendlier message and let the
+            # next poll snap state back to reality.
+            if getattr(e, "code", None) == 4:
+                _LOGGER.warning(
+                    "control_zone(sub=%s, port=%s, mode=%s, duration=%s) "
+                    "rejected with HomGar code 4 (device-busy)",
+                    sub.sid, port, mode, duration,
+                )
+                await self.async_request_refresh()
+                raise HomeAssistantError(
+                    "Valve was busy — wait a few seconds and try again."
+                ) from e
+            raise
         await self.async_request_refresh()
 
     def _apply_optimistic(
