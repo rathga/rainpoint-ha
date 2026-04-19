@@ -43,23 +43,70 @@ decluttering_templates:
       # the outer wrapper's card border. Don't add a global card_mod here
       # (it'll cascade to the outer ha-card and kill the wrapper border).
       cards:
-        # Header — title + last cycle usage in one mushroom row.
-        - type: custom:mushroom-template-card
-          primary: "[[title]]"
-          secondary: >-
-            Last cycle: {{ states('sensor.htv213frf_[[slug]]_last_cycle_usage') }} L
-          icon: mdi:water-pump
-          icon_color: blue
-          fill_container: true
-          tap_action:
-            action: none
+        # Header — title + last cycle usage on the left, diagnostic
+        # chips (signal + battery) on the right.
+        - type: horizontal-stack
           card_mod:
             style: |
-              ha-card {
-                background: transparent !important;
-                box-shadow: none !important;
-                border: none !important;
+              #root {
+                display: grid !important;
+                grid-template-columns: 1fr auto !important;
+                align-items: center;
               }
+          cards:
+            - type: custom:mushroom-template-card
+              primary: "[[title]]"
+              secondary: >-
+                Last cycle: {{ states('sensor.htv213frf_[[slug]]_last_cycle_usage') }} L
+              icon: mdi:water-pump
+              icon_color: blue
+              fill_container: true
+              tap_action:
+                action: none
+              card_mod:
+                style: |
+                  ha-card {
+                    background: transparent !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                  }
+            - type: custom:mushroom-chips-card
+              alignment: end
+              chips:
+                - type: template
+                  entity: sensor.htv213frf_rf_rssi
+                  icon: >-
+                    {% set r = states('sensor.htv213frf_rf_rssi') | int(-100) %}
+                    {% if r >= -60 %}mdi:signal-cellular-3
+                    {% elif r >= -75 %}mdi:signal-cellular-2
+                    {% else %}mdi:signal-cellular-1{% endif %}
+                  icon_color: >-
+                    {% set r = states('sensor.htv213frf_rf_rssi') | int(-100) %}
+                    {% if r >= -60 %}green
+                    {% elif r >= -75 %}amber
+                    {% else %}red{% endif %}
+                  content: ""
+                  tap_action:
+                    action: more-info
+                - type: template
+                  entity: binary_sensor.htv213frf_battery_low
+                  icon: >-
+                    {% if is_state('binary_sensor.htv213frf_battery_low', 'on') %}mdi:battery-alert-variant-outline
+                    {% else %}mdi:battery{% endif %}
+                  icon_color: >-
+                    {% if is_state('binary_sensor.htv213frf_battery_low', 'on') %}red
+                    {% else %}green{% endif %}
+                  content: ""
+                  tap_action:
+                    action: more-info
+              card_mod:
+                style: |
+                  ha-card {
+                    background: transparent !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                    padding: 0 12px !important;
+                  }
 
         # Idle row — slider + RUN button on one line.
         - type: conditional
@@ -68,19 +115,43 @@ decluttering_templates:
               state: "off"
           card:
             type: horizontal-stack
-            # Override the default 50/50 flex layout so the slider takes
-            # all leftover space and the action button is content-sized.
+            # 3-column grid: label (content) | slider (1fr, fills) |
+            # button (content). Label lives in its own cell so it can't
+            # steal width from the slider — slider-entity-row's internal
+            # .info column was the source of the "30 % allocation"
+            # complaint, even with name="" it reserves space.
             card_mod:
               style: |
                 #root {
                   display: grid !important;
-                  grid-template-columns: 1fr auto !important;
+                  grid-template-columns: max-content 1fr max-content auto !important;
                   gap: 8px;
+                  align-items: center;
                 }
             cards:
-              # slider-entity-row gives the slider the maximum width;
-              # the built-in number-entity row reserves ~30% for the
-              # name no matter what.
+              # Cell 1: just the "Run for" label, content-sized.
+              - type: custom:button-card
+                show_icon: false
+                show_state: false
+                name: Run for
+                styles:
+                  card:
+                    - background: transparent
+                    - box-shadow: none
+                    - border: none
+                    - padding: 0 4px 0 16px
+                    - font-size: 14px
+                    - color: var(--secondary-text-color)
+                    - height: auto
+                    - cursor: default
+
+              # Cell 2: slider only, takes the full grid cell.
+              # full_row: true tells slider-entity-row to skip its
+              # internal .info column entirely (value moves to its own
+              # cell on the right so the slider gets the leftover space).
+              # 6 px horizontal padding stops the slider knob from being
+              # visually clipped against the adjacent grid cells when
+              # dragged to either edge.
               - type: entities
                 card_mod:
                   style: |
@@ -88,6 +159,7 @@ decluttering_templates:
                       background: transparent !important;
                       box-shadow: none !important;
                       border: none !important;
+                      padding: 0;
                     }
                     .card-content {
                       padding: 0 12px !important;
@@ -95,36 +167,98 @@ decluttering_templates:
                 entities:
                   - type: custom:slider-entity-row
                     entity: number.htv213frf_[[slug]]_run_minutes
-                    name: Run for
-              - type: custom:mushroom-template-card
-                primary: >-
-                  {% set cd = states('sensor.htv213frf_[[slug]]_cooldown') %}
-                  {% if cd not in ['0','unknown','unavailable'] %}
-                    {{ cd }}s
-                  {% else %}
-                    RUN
-                  {% endif %}
+                    full_row: true
+                    hide_state: true   # value lives in its own grid cell
+
+              # Cell 3: live value of the slider in minutes.
+              - type: custom:button-card
+                entity: number.htv213frf_[[slug]]_run_minutes
+                show_icon: false
+                show_name: false
+                show_state: false
+                name: ""
+                custom_fields:
+                  value: |
+                    [[[ return Math.round(parseFloat(entity.state)) + ' min'; ]]]
+                styles:
+                  card:
+                    - background: transparent
+                    - box-shadow: none
+                    - border: none
+                    - padding: 0 4px
+                    - font-size: 14px
+                    - font-variant-numeric: tabular-nums
+                    - color: var(--primary-text-color)
+                    - min-width: 56px
+                    - text-align: right
+                    - height: auto
+                    - cursor: default
+                  custom_fields:
+                    value:
+                      - text-align: right
+              - type: custom:button-card
+                entity: switch.htv213frf_[[slug]]
+                show_icon: true
+                show_name: true
+                show_state: false
                 icon: mdi:play-circle
-                icon_color: >-
-                  {% if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] %}
-                    disabled
-                  {% else %}
-                    green
-                  {% endif %}
+                name: |
+                  [[[
+                    const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
+                    if (cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable') {
+                      return cd.state + 's';
+                    }
+                    return 'RUN';
+                  ]]]
                 tap_action:
                   action: call-service
                   service: switch.turn_on
                   target:
                     entity_id: switch.htv213frf_[[slug]]
-                fill_container: false
+                styles:
+                  card:
+                    - background: "rgba(76, 175, 80, 0.18)"
+                    - border-radius: 14px
+                    - border: none
+                    - box-shadow: none
+                    - padding: 2px 10px 2px 4px
+                    - margin: 0 8px
+                    - height: auto
+                    - min-height: 0
+                    - transition: background 0.15s ease, transform 0.1s ease
+                  grid:
+                    - grid-template-areas: '"i n"'
+                    - grid-template-columns: auto 1fr
+                    - gap: 2px
+                    - align-items: center
+                  icon:
+                    - width: 20px
+                    - height: 20px
+                    - color: rgb(76, 175, 80)
+                  name:
+                    - justify-self: start
+                    - font-weight: 600
+                    - font-size: 13px
+                    - letter-spacing: 0.3px
+                    - color: var(--primary-text-color)
+                state:
+                  - operator: template
+                    value: >
+                      [[[
+                        const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
+                        return cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable';
+                      ]]]
+                    styles:
+                      card:
+                        - pointer-events: none
+                        - opacity: 0.5
                 card_mod:
                   style: |
-                    ha-card {
-                      background: transparent !important;
-                      box-shadow: none !important;
-                      border: none !important;
-                      pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
-                      opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
+                    ha-card:hover {
+                      background: rgba(76, 175, 80, 0.30) !important;
+                    }
+                    ha-card:active {
+                      transform: scale(0.97);
                     }
 
         # Running row — live mm:ss countdown + STOP button on one line.
@@ -142,51 +276,111 @@ decluttering_templates:
                   gap: 8px;
                 }
             cards:
-              - type: custom:mushroom-template-card
-                primary: Running...
-                secondary: >-
-                  {{ states('sensor.htv213frf_[[slug]]_remaining') }} remaining
-                icon: mdi:timer-outline
-                icon_color: cyan
-                fill_container: true
-                tap_action:
-                  action: none
-                card_mod:
-                  style: |
-                    ha-card {
-                      background: transparent !important;
-                      box-shadow: none !important;
-                      border: none !important;
-                    }
-              - type: custom:mushroom-template-card
-                primary: >-
-                  {% set cd = states('sensor.htv213frf_[[slug]]_cooldown') %}
-                  {% if cd not in ['0','unknown','unavailable'] %}
-                    {{ cd }}s
-                  {% else %}
-                    STOP
-                  {% endif %}
+              # Running label + countdown on ONE line via a custom:button-card
+              # grid: [icon][Running...][4:32 remaining][(spacer)]. The spacer
+              # makes the row fill the 1fr cell of the outer horizontal-stack
+              # so STOP stays flush right.
+              - type: custom:button-card
+                show_name: false
+                show_icon: false
+                show_state: false
+                custom_fields:
+                  icon: >
+                    <ha-icon icon="mdi:timer-outline"
+                      style="color: rgb(var(--rgb-cyan, 8 208 208)); --mdc-icon-size: 22px;"></ha-icon>
+                  label: Running...
+                  countdown: |
+                    [[[
+                      const s = states['sensor.htv213frf_[[slug]]_remaining'];
+                      return (s && s.state && s.state !== 'unknown' ? s.state + ' remaining' : '…');
+                    ]]]
+                styles:
+                  card:
+                    - background: transparent !important
+                    - box-shadow: none !important
+                    - border: none !important
+                    - padding: 0 12px !important
+                    - height: auto
+                    - cursor: default
+                  grid:
+                    - grid-template-areas: '"icon label countdown filler"'
+                    - grid-template-columns: auto auto auto 1fr
+                    - gap: 10px
+                    - align-items: center
+                  custom_fields:
+                    icon:
+                      - justify-self: start
+                    label:
+                      - justify-self: start
+                      - font-weight: 500
+                      - color: var(--primary-text-color)
+                    countdown:
+                      - justify-self: start
+                      - color: var(--secondary-text-color)
+                      - font-variant-numeric: tabular-nums
+              - type: custom:button-card
+                entity: switch.htv213frf_[[slug]]
+                show_icon: true
+                show_name: true
+                show_state: false
                 icon: mdi:stop-circle
-                icon_color: >-
-                  {% if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] %}
-                    disabled
-                  {% else %}
-                    red
-                  {% endif %}
+                name: |
+                  [[[
+                    const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
+                    if (cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable') {
+                      return cd.state + 's';
+                    }
+                    return 'STOP';
+                  ]]]
                 tap_action:
                   action: call-service
                   service: switch.turn_off
                   target:
                     entity_id: switch.htv213frf_[[slug]]
-                fill_container: false
+                styles:
+                  card:
+                    - background: "rgba(244, 67, 54, 0.18)"
+                    - border-radius: 14px
+                    - border: none
+                    - box-shadow: none
+                    - padding: 2px 10px 2px 4px
+                    - margin: 0 8px
+                    - height: auto
+                    - min-height: 0
+                    - transition: background 0.15s ease, transform 0.1s ease
+                  grid:
+                    - grid-template-areas: '"i n"'
+                    - grid-template-columns: auto 1fr
+                    - gap: 2px
+                    - align-items: center
+                  icon:
+                    - width: 20px
+                    - height: 20px
+                    - color: rgb(244, 67, 54)
+                  name:
+                    - justify-self: start
+                    - font-weight: 600
+                    - font-size: 13px
+                    - letter-spacing: 0.3px
+                    - color: var(--primary-text-color)
+                state:
+                  - operator: template
+                    value: >
+                      [[[
+                        const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
+                        return cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable';
+                      ]]]
+                    styles:
+                      card:
+                        - pointer-events: none
+                        - opacity: 0.5
                 card_mod:
                   style: |
-                    ha-card {
-                      background: transparent !important;
-                      box-shadow: none !important;
-                      border: none !important;
-                      pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
-                      opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
+                    ha-card:hover {
+                      background: rgba(244, 67, 54, 0.30) !important;
+                    }
+                    ha-card:active {
+                      transform: scale(0.97);
                     }
 
 views:

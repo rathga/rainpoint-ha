@@ -78,6 +78,12 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         # Blocks further control for COOLDOWN_SECONDS — matches the
         # phone app's ~10-15 s lockout after any start/stop.
         self._last_command_at: Dict[Tuple[int, int], datetime] = {}
+        # Stale-cache suppression: after a runs_until expires and the
+        # cloud cache still says running, we stop believing wkstate>0
+        # until the cache reports idle organically. Prevents the cache
+        # from triggering a spurious idle->running transition on the
+        # next poll (= invented countdown + spurious cooldown).
+        self._stale_cache: Dict[Tuple[int, int], bool] = {}
 
     # ------------------------------------------------------------------
     # Option-backed values with safe defaults when no entry is supplied.
@@ -105,6 +111,22 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             return await self.hass.async_add_executor_job(self._sync_refresh)
         except HomgarApiException as e:
             raise UpdateFailed(f"HomGar API error {e.code}: {e.msg}") from e
+        except Exception as e:  # noqa: BLE001
+            # HomGar's HTTP endpoint occasionally drops the TCP
+            # connection mid-request (RemoteDisconnected, ConnectionError,
+            # ChunkedEncodingError, ...). One blip shouldn't flip every
+            # rainpoint entity to "unavailable" — keep the last known
+            # state and try again on the next poll. If we have no prior
+            # data we still raise so the user sees the integration
+            # actually failed to start.
+            if self._hubs:
+                _LOGGER.warning(
+                    "rainpoint poll failed (%s: %s) — keeping last "
+                    "known state, will retry next cycle.",
+                    type(e).__name__, e,
+                )
+                return self._hubs
+            raise UpdateFailed(f"HomGar poll failed: {e}") from e
 
     def _sync_refresh(self) -> List[HomgarHubDevice]:
         self._api.ensure_logged_in(self.email, self.password, area_code=self.area_code)
@@ -122,8 +144,14 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             for sub in hub.subdevices:
                 if isinstance(sub, RainPoint2ZoneTimer_V2):
                     for port_num, port in sub.ports.items():
-                        self._apply_grace(sub.sid, port_num, port, now)
-                        self._observe_port(sub.sid, port_num, port, now)
+                        in_grace = self._apply_grace(sub.sid, port_num, port, now)
+                        # Skip transition bookkeeping while grace is forcing
+                        # wkstate — port.running reflects what we commanded,
+                        # not device truth. Otherwise a STOP that's still
+                        # propagating gets re-detected as a fresh start when
+                        # grace expires and the cache still says running.
+                        if not in_grace:
+                            self._observe_port(sub.sid, port_num, port, now)
                         if port.running:
                             any_running = True
         # Adaptive cadence: faster while a zone runs so state flips are quick.
@@ -132,23 +160,27 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         self.update_interval = active if any_running else idle
         return self._hubs
 
-    def _apply_grace(self, sid: int, port_num: int, port, now: datetime) -> None:
+    def _apply_grace(self, sid: int, port_num: int, port, now: datetime) -> bool:
         """Force poll-reported wkstate back to what we optimistically
         commanded, for a short window after an HA-initiated control.
 
         HomGar accepts the command fast but takes 10-20 s to update
         ``/getDeviceStatus``. Without this, the very next poll flips
-        the switch back to off mid-run (or on, for a stop).
+        the switch back to off mid-run (or on, for a stop). Returns
+        ``True`` while the override is still in effect, so the caller
+        can skip transition bookkeeping (the forced wkstate isn't the
+        device's real state).
         """
         key = (sid, port_num)
         pending = self._grace.get(key)
         if pending is None:
-            return
+            return False
         expires, wkstate = pending
         if now >= expires:
             self._grace.pop(key, None)
-            return
+            return False
         port.wkstate = wkstate
+        return True
 
     def _observe_port(self, sid: int, port_num: int, port, now: datetime) -> None:
         """Reconcile per-port bookkeeping from a fresh poll.
@@ -172,6 +204,30 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         length, not the remaining time.
         """
         key = (sid, port_num)
+        state_forced = False
+
+        # (1) Ongoing stale-cache suppression. If we previously caught
+        # the cache lagging reality, keep forcing idle locally until the
+        # cache reports idle organically — that's our signal that the
+        # push from the device has finally caught up.
+        if self._stale_cache.get(key, False):
+            if port.wkstate == 0:
+                self._stale_cache[key] = False
+            else:
+                port.wkstate = 0
+                state_forced = True
+
+        # (2) Staleness self-correct: runs_until has passed but we still
+        # see wkstate>0 (cache hasn't updated). Force idle AND raise the
+        # stale-cache flag so subsequent polls within the lag window
+        # don't re-trigger a fresh idle->running transition.
+        scheduled_end = self._runs_until.get(key)
+        if scheduled_end is not None and now > scheduled_end:
+            if port.wkstate != 0:
+                port.wkstate = 0
+                state_forced = True
+                self._stale_cache[key] = True
+
         prev = self._prev_running.get(key)
         is_running = port.running
         if is_running:
@@ -183,11 +239,16 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
                 self._runs_until[key] = now + timedelta(seconds=int(port.duration_s))
         else:
             self._runs_until.pop(key, None)
-        # If we just observed a state flip we didn't initiate (e.g. the
-        # phone app started or stopped the valve), start the cooldown
-        # counter so a follow-up HA tap won't slam straight into the
-        # device's own rate limit.
-        if prev is not None and prev != is_running:
+        # Cooldown only fires for transitions we actually *observed* —
+        # never for ones we forced ourselves (natural-end staleness
+        # correct, or stale-cache suppression). External stops (phone
+        # app, device schedule) still start a cooldown so the user
+        # can't immediately slam a new RUN into the hardware.
+        if (
+            prev is not None
+            and prev != is_running
+            and not state_forced
+        ):
             self._last_command_at[key] = now
         self._prev_running[key] = is_running
 
@@ -291,6 +352,10 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             self._runs_until[key] = now + timedelta(seconds=int(duration))
             self._prev_running[key] = True
             self._grace[key] = (grace_until, 0x21)
+            # Fresh RUN: the cache is about to show the new running
+            # state; any lingering stale flag from the previous cycle
+            # should be cleared.
+            self._stale_cache.pop(key, None)
         elif mode == MODE_OFF:
             port.wkstate = 0
             # Shorter grace for STOP — HomGar either accepts it quickly

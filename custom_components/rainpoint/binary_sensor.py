@@ -37,6 +37,7 @@ async def async_setup_entry(
             if isinstance(sub, RainPoint2ZoneTimer_V2):
                 for port in (1, 2):
                     entities.append(ZoneRunningBinarySensor(coord, hub, sub, port))
+                entities.append(TimerLowBatteryBinarySensor(coord, hub, sub))
             elif isinstance(sub, RainPointRainSensor):
                 entities.append(RainSensorLowBatteryBinarySensor(coord, hub, sub))
     async_add_entities(entities)
@@ -84,6 +85,37 @@ class HubConnectedBinarySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def is_on(self) -> Optional[bool]:
         return getattr(self._hub, "connected", None)
+
+
+class TimerLowBatteryBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """On when the 2-zone timer firmware reports battery as low.
+
+    Mirrors the rain-sensor convention: ``STA_BAT`` is an enum where
+    1 = normal, 3 = low. Other values are treated as unknown so a
+    firmware we haven't seen doesn't fire a false positive.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.BATTERY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: RainPointCoordinator, hub, sub):
+        super().__init__(coordinator)
+        self._hub = hub
+        self._sub = sub
+        self._attr_unique_id = f"rainpoint_{sub.sid}_low_battery"
+        self._attr_name = "Battery low"
+
+    @property
+    def device_info(self):
+        return sub_device_info(self._hub, self._sub)
+
+    @property
+    def is_on(self) -> Optional[bool]:
+        state = getattr(self._sub, "battery_state", None)
+        if state is None:
+            return None
+        return state == 3
 
 
 class RainSensorLowBatteryBinarySensor(CoordinatorEntity, BinarySensorEntity):
