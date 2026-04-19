@@ -1,23 +1,33 @@
 # RainPoint valve card — polished HACS-backed version.
 #
-# Two HACS frontend plugins required:
-#   - decluttering-card  (HACS → Frontend → "Decluttering Card")
+# Four HACS frontend plugins required:
+#   - mushroom            (HACS → Frontend → "Mushroom Cards")
+#     https://github.com/piitaya/lovelace-mushroom
+#   - stack-in-card       (HACS → Frontend → "Stack In Card")
+#     https://github.com/custom-cards/stack-in-card
+#   - card-mod            (HACS → Frontend → "card-mod")
+#     https://github.com/thomasloven/lovelace-card-mod
+#     (used to constrain button width inside horizontal-stack and to
+#     disable the button while in cooldown — mushroom integrates with it.)
+#   - decluttering-card   (HACS → Frontend → "Decluttering Card")
 #     https://github.com/custom-cards/decluttering-card
-#   - button-card        (HACS → Frontend → "button-card")
-#     https://github.com/custom-cards/button-card
 #
-# A single template in decluttering_templates is instantiated once per
-# zone in the view. Slider/countdown sit on the same row as a compact
-# 90 px-wide action button whose label flips between RUN, STOP and
-# "Xs" (cooldown) and dims while cooldown is non-zero.
+# Layout per zone (one flat borderless card):
+#   ┌──────────────────────────────────────────────────────────┐
+#   │ 💧  Sprinklers                  Last cycle: 2.3 L         │
+#   │ Run for   [══════════════slider═══════════════]  5  [RUN] │
+#   └──────────────────────────────────────────────────────────┘
 #
-# For the built-in-cards-only version, see valve-card.yaml in the same
-# directory.
+# The action button on the right is mushroom-template-card sized to its
+# content (~80 px). It re-labels itself between RUN, STOP and "Xs"
+# (cooldown) and dims while the cooldown sensor is non-zero. Identical
+# slider+button row swaps to countdown+STOP when running.
+#
+# For the no-HACS version see valve-card.yaml in this directory.
 #
 # Paste the whole file into Dashboard → ⋯ → Edit → ⋯ → Raw configuration
-# editor. The `decluttering_templates:` block needs to live at the
-# top level of the dashboard config (sibling of `views:`), not inside
-# a view.
+# editor — `decluttering_templates:` must live at the top level (sibling
+# of `views:`), not inside a view.
 
 decluttering_templates:
   rainpoint_valve_card:
@@ -25,17 +35,23 @@ decluttering_templates:
       - title: Zone
       - slug: sprinklers
     card:
-      type: vertical-stack
+      type: custom:stack-in-card
+      mode: vertical
+      keep:
+        background: true
       cards:
-        # Header + always-visible info.
-        - type: entities
-          title: "[[title]]"
-          state_color: true
-          entities:
-            - entity: sensor.htv213frf_[[slug]]_last_cycle_usage
-              name: Last cycle usage
+        # Header — title + last cycle usage in one mushroom row.
+        - type: custom:mushroom-template-card
+          primary: "[[title]]"
+          secondary: >-
+            Last cycle: {{ states('sensor.htv213frf_[[slug]]_last_cycle_usage') }} L
+          icon: mdi:water-pump
+          icon_color: blue
+          fill_container: true
+          tap_action:
+            action: none
 
-        # ---- Idle: slider + RUN button on one row ----
+        # Idle row — slider + RUN button on one line.
         - type: conditional
           conditions:
             - entity: switch.htv213frf_[[slug]]
@@ -43,51 +59,43 @@ decluttering_templates:
           card:
             type: horizontal-stack
             cards:
-              - type: tile
+              - type: custom:mushroom-number-card
                 entity: number.htv213frf_[[slug]]_run_minutes
                 name: Run for
-                features:
-                  - type: numeric-input
-                    style: slider
-              - type: custom:button-card
-                entity: switch.htv213frf_[[slug]]
-                show_icon: false
-                show_state: false
-                name: |
-                  [[[
-                    const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
-                    if (cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable') {
-                      return cd.state + 's';
-                    }
-                    return 'RUN';
-                  ]]]
+                icon_type: none
+                display_mode: slider
+                fill_container: true
+              - type: custom:mushroom-template-card
+                primary: >-
+                  {% set cd = states('sensor.htv213frf_[[slug]]_cooldown') %}
+                  {% if cd not in ['0','unknown','unavailable'] %}
+                    {{ cd }}s
+                  {% else %}
+                    RUN
+                  {% endif %}
+                icon: mdi:play-circle
+                icon_color: >-
+                  {% if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] %}
+                    disabled
+                  {% else %}
+                    green
+                  {% endif %}
                 tap_action:
                   action: call-service
                   service: switch.turn_on
-                  service_data:
+                  target:
                     entity_id: switch.htv213frf_[[slug]]
-                styles:
-                  card:
-                    - width: 90px
-                    - height: 56px
-                    - margin: 0 0 0 auto
-                    - font-size: 14px
-                    - font-weight: 600
-                    - letter-spacing: 1px
-                    - border-radius: 12px
-                state:
-                  - operator: template
-                    value: >
-                      [[[
-                        const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
-                        return cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable';
-                      ]]]
-                    styles:
-                      card:
-                        - pointer-events: none
-                        - opacity: 0.5
+                fill_container: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      width: 110px !important;
+                      flex: 0 0 110px !important;
+                      pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
+                      opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
+                    }
 
-        # ---- Running: countdown + STOP button on one row ----
+        # Running row — live mm:ss countdown + STOP button on one line.
         - type: conditional
           conditions:
             - entity: switch.htv213frf_[[slug]]
@@ -95,47 +103,44 @@ decluttering_templates:
           card:
             type: horizontal-stack
             cards:
-              - type: tile
-                entity: sensor.htv213frf_[[slug]]_remaining
-                name: Running...
+              - type: custom:mushroom-template-card
+                primary: Running...
+                secondary: >-
+                  {{ states('sensor.htv213frf_[[slug]]_remaining') }} remaining
                 icon: mdi:timer-outline
-              - type: custom:button-card
-                entity: switch.htv213frf_[[slug]]
-                show_icon: false
-                show_state: false
-                name: |
-                  [[[
-                    const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
-                    if (cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable') {
-                      return cd.state + 's';
-                    }
-                    return 'STOP';
-                  ]]]
+                icon_color: cyan
+                fill_container: true
+                tap_action:
+                  action: none
+              - type: custom:mushroom-template-card
+                primary: >-
+                  {% set cd = states('sensor.htv213frf_[[slug]]_cooldown') %}
+                  {% if cd not in ['0','unknown','unavailable'] %}
+                    {{ cd }}s
+                  {% else %}
+                    STOP
+                  {% endif %}
+                icon: mdi:stop-circle
+                icon_color: >-
+                  {% if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] %}
+                    disabled
+                  {% else %}
+                    red
+                  {% endif %}
                 tap_action:
                   action: call-service
                   service: switch.turn_off
-                  service_data:
+                  target:
                     entity_id: switch.htv213frf_[[slug]]
-                styles:
-                  card:
-                    - width: 90px
-                    - height: 56px
-                    - margin: 0 0 0 auto
-                    - font-size: 14px
-                    - font-weight: 600
-                    - letter-spacing: 1px
-                    - border-radius: 12px
-                state:
-                  - operator: template
-                    value: >
-                      [[[
-                        const cd = states['sensor.htv213frf_[[slug]]_cooldown'];
-                        return cd && cd.state !== '0' && cd.state !== 'unknown' && cd.state !== 'unavailable';
-                      ]]]
-                    styles:
-                      card:
-                        - pointer-events: none
-                        - opacity: 0.5
+                fill_container: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      width: 110px !important;
+                      flex: 0 0 110px !important;
+                      pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
+                      opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
+                    }
 
 views:
   - title: Irrigation
