@@ -1,0 +1,50 @@
+# RainPoint rain-sensor card — built-in cards only, no HACS.
+#
+# Shows current rainfall windows + a trend graph + a low-battery
+# warning row that only appears when the firmware reports it.
+#
+# Entity ids assume the default friendly names HA generates from the
+# sub-device's API name ("Sensor 02"). Adjust the slugs if your hub
+# names the rain sensor differently — Developer Tools → States,
+# filter "rainfall".
+
+type: vertical-stack
+cards:
+  - type: entities
+    title: Rain
+    state_color: false
+    entities:
+      - entity: sensor.sensor_02_rainfall_1h
+        name: Last hour
+        icon: mdi:weather-pouring
+      - entity: sensor.sensor_02_rainfall_24h
+        name: Last 24 h
+        icon: mdi:weather-rainy
+      - entity: sensor.sensor_02_rainfall_7d
+        name: Last 7 days
+        icon: mdi:calendar-week
+      - entity: sensor.sensor_02_rainfall_total
+        name: Lifetime total
+        icon: mdi:counter
+      # Low-battery warning — hidden until the rain sensor actually
+      # reports it (binary_sensor goes "on" when STA_BAT enum == 3).
+      - type: conditional
+        conditions:
+          - entity: binary_sensor.sensor_02_battery_low
+            state: "on"
+        row:
+          entity: binary_sensor.sensor_02_battery_low
+          name: Low battery — replace soon
+          icon: mdi:battery-alert
+
+  # Trend over 24 h, sampled hourly. The 1h-window sensor makes the
+  # most useful trace: each point ≈ "how much rain fell in the hour
+  # ending at this timestamp". The 24h/7d windows roll continuously
+  # and would just trace a smooth running total.
+  - type: history-graph
+    title: Last hour reading over 24 h
+    hours_to_show: 24
+    refresh_interval: 0
+    entities:
+      - entity: sensor.sensor_02_rainfall_1h
+        name: mm/h
