@@ -153,14 +153,17 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
     def _observe_port(self, sid: int, port_num: int, port, now: datetime) -> None:
         """Reconcile per-port bookkeeping from a fresh poll.
 
-        Stamps ``runs_until`` when we have no existing stamp and the port
-        is reported running:
-
-        * First poll after HA start (``prev is None``): best-effort —
-          we don't know when it actually started, but ``duration_s``
-          gives an upper bound that's much better than "unknown".
-        * Observed idle->running transition (``prev is False``): a
-          genuine fresh start (e.g. via the phone app).
+        Stamps ``runs_until`` only on observed idle->running transitions
+        (``prev is False`` and ``is_running``). We deliberately do NOT
+        stamp when ``prev is None`` (first poll after HA start) because
+        the HomGar HTTP /getDeviceStatus cache can hold a stuck
+        ``wkstate=33`` long after the valve has actually stopped — the
+        phone app gets the real state via MQTT push, our polling
+        doesn't always see the cache update. Stamping in that situation
+        invents a fake countdown that just keeps re-arming.
+        Trade-off: a genuine "HA restarted mid-run" scenario will read
+        "Running... unknown" until the run ends and a new transition
+        is observed.
 
         If the coordinator already has a ``runs_until`` for this key
         (e.g. stamped by an HA-initiated optimistic update), we leave
@@ -172,7 +175,11 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         prev = self._prev_running.get(key)
         is_running = port.running
         if is_running:
-            if key not in self._runs_until and port.duration_s:
+            if (
+                prev is False
+                and key not in self._runs_until
+                and port.duration_s
+            ):
                 self._runs_until[key] = now + timedelta(seconds=int(port.duration_s))
         else:
             self._runs_until.pop(key, None)
@@ -297,3 +304,23 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
 
     async def async_turn_off(self, sub, port: int) -> None:
         await self.async_control(sub, port, MODE_OFF, 0)
+
+    def force_idle(self, sub, port_num: int) -> None:
+        """Locally clear stuck "running" state without hitting the API.
+
+        HomGar's HTTP /getDeviceStatus cache occasionally holds a stuck
+        ``wkstate=33`` long after the valve has actually stopped (the
+        phone app sees the real state via MQTT push). Calling control
+        endpoint with mode=OFF in that case does nothing — the device
+        is already idle. This lets HA agree with reality without an
+        actual API roundtrip.
+        """
+        port = sub.ports.get(port_num) if hasattr(sub, "ports") else None
+        if port is None:
+            return
+        key = (getattr(sub, "sid", None), port_num)
+        port.wkstate = 0
+        self._runs_until.pop(key, None)
+        self._grace.pop(key, None)
+        self._prev_running[key] = False
+        self.async_set_updated_data(self._hubs)

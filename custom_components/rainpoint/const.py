@@ -29,8 +29,9 @@ DEFAULT_RUN_MINUTES = 5
 # Hard cap for any run (phone app also enforces this upper bound).
 MAX_RUN_MINUTES = 720
 
-# Custom service name: rainpoint.run_zone(entity_id, duration)
+# Custom service names
 SERVICE_RUN_ZONE = "run_zone"
+SERVICE_FORCE_OFF = "force_off"
 ATTR_DURATION = "duration"
 
 POLL_INTERVAL_IDLE = timedelta(seconds=DEFAULT_POLL_IDLE_S)

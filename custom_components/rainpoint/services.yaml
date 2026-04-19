@@ -24,3 +24,22 @@ run_zone:
           step: 1
           unit_of_measurement: min
           mode: box
+
+force_off:
+  name: Force off (local)
+  description: >
+    Locally clear stuck "running" state without hitting the API. Use
+    when HomGar's HTTP cache reports a valve as running but the phone
+    app (and the actual valve) say otherwise — calling switch.turn_off
+    in that case would just hit the same stale cache. This service
+    only flips HA's local state; the next genuine status update will
+    overwrite it.
+  fields:
+    entity_id:
+      name: Zone switch
+      description: The switch entity to clear.
+      required: true
+      selector:
+        entity:
+          integration: rainpoint
+          domain: switch

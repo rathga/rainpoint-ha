@@ -20,6 +20,7 @@ from .const import (
     MAX_RUN_MINUTES,
     MIN_RUN_MINUTES,
     PLATFORMS,
+    SERVICE_FORCE_OFF,
     SERVICE_RUN_ZONE,
 )
 from .coordinator import RainPointCoordinator
@@ -35,6 +36,47 @@ RUN_ZONE_SCHEMA = vol.Schema(
         ),
     }
 )
+
+FORCE_OFF_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+    }
+)
+
+
+def _resolve_targets(
+    hass: HomeAssistant, entity_ids: list[str]
+) -> list[tuple[RainPointCoordinator, RainPoint2ZoneTimer_V2, int]]:
+    """Look up (coordinator, sub_device, port) tuples for a list of
+    rainpoint switch entity ids. Skips anything that isn't one of ours."""
+    reg = er.async_get(hass)
+    targets = []
+    for entity_id in entity_ids:
+        entry = reg.async_get(entity_id)
+        if entry is None or entry.platform != DOMAIN or entry.domain != "switch":
+            _LOGGER.warning("rainpoint service: %s is not a rainpoint switch", entity_id)
+            continue
+        parts = (entry.unique_id or "").split("_")
+        if len(parts) != 3 or parts[0] != "rainpoint" or not parts[2].startswith("port"):
+            _LOGGER.warning(
+                "rainpoint service: unexpected unique_id %r on %s",
+                entry.unique_id, entity_id,
+            )
+            continue
+        try:
+            sid = int(parts[1])
+            port = int(parts[2][4:])
+        except ValueError:
+            continue
+        for coord in hass.data.get(DOMAIN, {}).values():
+            for hub in coord.hubs:
+                for sub in hub.subdevices:
+                    if (
+                        isinstance(sub, RainPoint2ZoneTimer_V2)
+                        and getattr(sub, "sid", None) == sid
+                    ):
+                        targets.append((coord, sub, port))
+    return targets
 
 
 async def _async_reload_on_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -69,47 +111,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
-    """Register the ``rainpoint.run_zone`` service (idempotent)."""
-    if hass.services.has_service(DOMAIN, SERVICE_RUN_ZONE):
-        return
+    """Register custom rainpoint services (idempotent)."""
 
     async def _run_zone(call: ServiceCall) -> None:
-        reg = er.async_get(hass)
         # Users configure in minutes; the HomGar control endpoint wants seconds.
         duration_s = int(call.data[ATTR_DURATION]) * 60
-        targets: list[tuple[RainPointCoordinator, RainPoint2ZoneTimer_V2, int]] = []
-        for entity_id in call.data[ATTR_ENTITY_ID]:
-            entry = reg.async_get(entity_id)
-            if entry is None or entry.platform != DOMAIN or entry.domain != "switch":
-                _LOGGER.warning("rainpoint.run_zone: %s is not a rainpoint switch", entity_id)
-                continue
-            # unique_id format from switch.py: rainpoint_<sid>_port<N>
-            parts = (entry.unique_id or "").split("_")
-            if len(parts) != 3 or parts[0] != "rainpoint" or not parts[2].startswith("port"):
-                _LOGGER.warning(
-                    "rainpoint.run_zone: unexpected unique_id %r on %s",
-                    entry.unique_id, entity_id,
-                )
-                continue
-            try:
-                sid = int(parts[1])
-                port = int(parts[2][4:])
-            except ValueError:
-                continue
-            for coord in hass.data.get(DOMAIN, {}).values():
-                for hub in coord.hubs:
-                    for sub in hub.subdevices:
-                        if (
-                            isinstance(sub, RainPoint2ZoneTimer_V2)
-                            and getattr(sub, "sid", None) == sid
-                        ):
-                            targets.append((coord, sub, port))
-        for coord, sub, port in targets:
+        for coord, sub, port in _resolve_targets(hass, call.data[ATTR_ENTITY_ID]):
             await coord.async_turn_on(sub, port, duration_s)
 
-    hass.services.async_register(
-        DOMAIN, SERVICE_RUN_ZONE, _run_zone, schema=RUN_ZONE_SCHEMA
-    )
+    async def _force_off(call: ServiceCall) -> None:
+        # Local-only state clear — does NOT call the API. Use when the
+        # HomGar HTTP cache is stuck reporting a valve as running but
+        # the phone app (and the actual valve) say otherwise.
+        for coord, sub, port in _resolve_targets(hass, call.data[ATTR_ENTITY_ID]):
+            coord.force_idle(sub, port)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_RUN_ZONE):
+        hass.services.async_register(
+            DOMAIN, SERVICE_RUN_ZONE, _run_zone, schema=RUN_ZONE_SCHEMA
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_FORCE_OFF):
+        hass.services.async_register(
+            DOMAIN, SERVICE_FORCE_OFF, _force_off, schema=FORCE_OFF_SCHEMA
+        )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -119,4 +143,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, SERVICE_RUN_ZONE)
+            hass.services.async_remove(DOMAIN, SERVICE_FORCE_OFF)
     return unloaded
