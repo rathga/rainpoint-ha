@@ -1,14 +1,16 @@
 # RainPoint valve card — polished HACS-backed version.
 #
-# Four HACS frontend plugins required:
+# Five HACS frontend plugins required:
 #   - mushroom            (HACS → Frontend → "Mushroom Cards")
 #     https://github.com/piitaya/lovelace-mushroom
 #   - stack-in-card       (HACS → Frontend → "Stack In Card")
 #     https://github.com/custom-cards/stack-in-card
 #   - card-mod            (HACS → Frontend → "card-mod")
 #     https://github.com/thomasloven/lovelace-card-mod
-#     (used to constrain button width inside horizontal-stack and to
-#     disable the button while in cooldown — mushroom integrates with it.)
+#   - slider-entity-row   (HACS → Frontend → "slider-entity-row")
+#     https://github.com/thomasloven/lovelace-slider-entity-row
+#     (built-in number-entity row reserves ~30% for the name; this one
+#     gives the slider the full leftover width.)
 #   - decluttering-card   (HACS → Frontend → "Decluttering Card")
 #     https://github.com/custom-cards/decluttering-card
 #
@@ -37,8 +39,9 @@ decluttering_templates:
     card:
       type: custom:stack-in-card
       mode: vertical
-      keep:
-        background: true
+      # Defaults strip box_shadow/border/background of children but keep
+      # the outer wrapper's card border. Don't add a global card_mod here
+      # (it'll cascade to the outer ha-card and kill the wrapper border).
       cards:
         # Header — title + last cycle usage in one mushroom row.
         - type: custom:mushroom-template-card
@@ -50,6 +53,13 @@ decluttering_templates:
           fill_container: true
           tap_action:
             action: none
+          card_mod:
+            style: |
+              ha-card {
+                background: transparent !important;
+                box-shadow: none !important;
+                border: none !important;
+              }
 
         # Idle row — slider + RUN button on one line.
         - type: conditional
@@ -68,13 +78,24 @@ decluttering_templates:
                   gap: 8px;
                 }
             cards:
-              - type: custom:mushroom-number-card
-                entity: number.htv213frf_[[slug]]_run_minutes
-                name: Run for
-                icon_type: none
-                display_mode: slider
-                layout: horizontal
-                fill_container: true
+              # slider-entity-row gives the slider the maximum width;
+              # the built-in number-entity row reserves ~30% for the
+              # name no matter what.
+              - type: entities
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: transparent !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                    }
+                    .card-content {
+                      padding: 0 12px !important;
+                    }
+                entities:
+                  - type: custom:slider-entity-row
+                    entity: number.htv213frf_[[slug]]_run_minutes
+                    name: Run for
               - type: custom:mushroom-template-card
                 primary: >-
                   {% set cd = states('sensor.htv213frf_[[slug]]_cooldown') %}
@@ -99,6 +120,9 @@ decluttering_templates:
                 card_mod:
                   style: |
                     ha-card {
+                      background: transparent !important;
+                      box-shadow: none !important;
+                      border: none !important;
                       pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
                       opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
                     }
@@ -110,6 +134,13 @@ decluttering_templates:
               state: "on"
           card:
             type: horizontal-stack
+            card_mod:
+              style: |
+                #root {
+                  display: grid !important;
+                  grid-template-columns: 1fr auto !important;
+                  gap: 8px;
+                }
             cards:
               - type: custom:mushroom-template-card
                 primary: Running...
@@ -120,6 +151,13 @@ decluttering_templates:
                 fill_container: true
                 tap_action:
                   action: none
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: transparent !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                    }
               - type: custom:mushroom-template-card
                 primary: >-
                   {% set cd = states('sensor.htv213frf_[[slug]]_cooldown') %}
@@ -144,6 +182,9 @@ decluttering_templates:
                 card_mod:
                   style: |
                     ha-card {
+                      background: transparent !important;
+                      box-shadow: none !important;
+                      border: none !important;
                       pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
                       opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
                     }
