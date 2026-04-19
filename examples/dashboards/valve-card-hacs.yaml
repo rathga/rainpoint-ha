@@ -58,12 +58,22 @@ decluttering_templates:
               state: "off"
           card:
             type: horizontal-stack
+            # Override the default 50/50 flex layout so the slider takes
+            # all leftover space and the action button is content-sized.
+            card_mod:
+              style: |
+                #root {
+                  display: grid !important;
+                  grid-template-columns: 1fr auto !important;
+                  gap: 8px;
+                }
             cards:
               - type: custom:mushroom-number-card
                 entity: number.htv213frf_[[slug]]_run_minutes
                 name: Run for
                 icon_type: none
                 display_mode: slider
+                layout: horizontal
                 fill_container: true
               - type: custom:mushroom-template-card
                 primary: >-
@@ -89,8 +99,6 @@ decluttering_templates:
                 card_mod:
                   style: |
                     ha-card {
-                      width: 110px !important;
-                      flex: 0 0 110px !important;
                       pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
                       opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
                     }
@@ -136,8 +144,6 @@ decluttering_templates:
                 card_mod:
                   style: |
                     ha-card {
-                      width: 110px !important;
-                      flex: 0 0 110px !important;
                       pointer-events: {{ "none" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "auto" }};
                       opacity: {{ "0.5" if states('sensor.htv213frf_[[slug]]_cooldown') not in ['0','unknown','unavailable'] else "1" }};
                     }
