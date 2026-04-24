@@ -35,7 +35,7 @@ async def async_setup_entry(
     for hub in coord.hubs:
         for sub in hub.subdevices:
             if isinstance(sub, RainPoint2ZoneTimer_V2):
-                for port in (1, 2):
+                for port in sub.ports:
                     entities.append(RainPointZoneSwitch(coord, hub, sub, port))
     async_add_entities(entities)
 

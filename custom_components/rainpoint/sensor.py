@@ -46,7 +46,7 @@ async def async_setup_entry(
         for sub in hub.subdevices:
             if isinstance(sub, RainPoint2ZoneTimer_V2):
                 entities.append(TimerRssiSensor(coord, hub, sub))
-                for port in (1, 2):
+                for port in sub.ports:
                     entities.append(TimerLastUsageSensor(coord, hub, sub, port))
                     entities.append(ZoneRunsUntilSensor(coord, hub, sub, port))
                     entities.append(ZoneRemainingSensor(coord, hub, sub, port))

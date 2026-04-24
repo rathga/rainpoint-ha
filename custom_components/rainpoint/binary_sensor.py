@@ -35,7 +35,7 @@ async def async_setup_entry(
             entities.append(HubConnectedBinarySensor(coord, hub))
         for sub in hub.subdevices:
             if isinstance(sub, RainPoint2ZoneTimer_V2):
-                for port in (1, 2):
+                for port in sub.ports:
                     entities.append(ZoneRunningBinarySensor(coord, hub, sub, port))
                 entities.append(TimerLowBatteryBinarySensor(coord, hub, sub))
             elif isinstance(sub, RainPointRainSensor):
