@@ -68,7 +68,7 @@ class ZoneRunMinutesNumber(RestoreNumber):
         self._sub = sub
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_run_minutes"
-        self._attr_name = f"{sub.port_label(port)} run minutes"
+        self._attr_name = f"{sub.port_label(port)} run minutes".strip()
         self._value: float = DEFAULT_RUN_MINUTES
 
     @property

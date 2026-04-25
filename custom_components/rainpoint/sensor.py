@@ -96,7 +96,7 @@ class TimerLastUsageSensor(_BaseSub):
         super().__init__(coordinator, hub, sub)
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_last_usage"
-        self._attr_name = f"{sub.port_label(port)} last-cycle usage"
+        self._attr_name = f"{sub.port_label(port)} last-cycle usage".strip()
 
     @property
     def native_value(self) -> Optional[float]:
@@ -123,7 +123,7 @@ class ZoneRunsUntilSensor(_BaseSub):
         super().__init__(coordinator, hub, sub)
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_runs_until"
-        self._attr_name = f"{sub.port_label(port)} runs until"
+        self._attr_name = f"{sub.port_label(port)} runs until".strip()
 
     @property
     def native_value(self) -> Optional[datetime]:
@@ -145,7 +145,7 @@ class ZoneCooldownSensor(_BaseSub):
         super().__init__(coordinator, hub, sub)
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_cooldown"
-        self._attr_name = f"{sub.port_label(port)} cooldown"
+        self._attr_name = f"{sub.port_label(port)} cooldown".strip()
         self._unsub_tick = None
 
     async def async_added_to_hass(self) -> None:
@@ -187,7 +187,7 @@ class ZoneRemainingSensor(_BaseSub):
         super().__init__(coordinator, hub, sub)
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}_remaining"
-        self._attr_name = f"{sub.port_label(port)} remaining"
+        self._attr_name = f"{sub.port_label(port)} remaining".strip()
         self._unsub_tick = None
 
     async def async_added_to_hass(self) -> None:

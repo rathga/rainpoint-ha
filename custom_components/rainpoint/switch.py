@@ -58,7 +58,10 @@ class RainPointZoneSwitch(CoordinatorEntity, SwitchEntity):
         self._port = port
         self._attr_unique_id = f"rainpoint_{sub.sid}_port{port}"
         # e.g. "Sprinklers" / "Dripline" from the API's portDescribe field.
-        self._attr_name = sub.port_label(port)
+        # For single-port devices with no portDescribe the helper returns
+        # "" — convert to None so HA renders the entity as the device
+        # name only (`switch.tank_topup` rather than `switch.tank_topup_port_1`).
+        self._attr_name = sub.port_label(port) or None
 
     @property
     def device_info(self):
