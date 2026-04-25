@@ -30,6 +30,12 @@ from .const import (
     MODE_OFF,
 )
 
+# Fallback run length used to anchor the staleness self-correct when the
+# first poll after HA start reports a running port and HomGar's cache
+# doesn't give us a usable duration. Just long enough to cover the phone
+# app's default manual run.
+_STARTUP_RUNNING_ANCHOR_S = DEFAULT_DURATION_S
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -185,17 +191,21 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
     def _observe_port(self, sid: int, port_num: int, port, now: datetime) -> None:
         """Reconcile per-port bookkeeping from a fresh poll.
 
-        Stamps ``runs_until`` only on observed idle->running transitions
-        (``prev is False`` and ``is_running``). We deliberately do NOT
-        stamp when ``prev is None`` (first poll after HA start) because
-        the HomGar HTTP /getDeviceStatus cache can hold a stuck
-        ``wkstate=33`` long after the valve has actually stopped — the
-        phone app gets the real state via MQTT push, our polling
-        doesn't always see the cache update. Stamping in that situation
-        invents a fake countdown that just keeps re-arming.
-        Trade-off: a genuine "HA restarted mid-run" scenario will read
-        "Running... unknown" until the run ends and a new transition
-        is observed.
+        Stamps ``runs_until`` on:
+          * observed idle->running transitions (``prev is False`` and
+            ``is_running``), using the port's reported duration; and
+          * the very first poll after HA start when the cache reports a
+            running port (``prev is None`` and ``is_running``), using
+            ``port.duration_s`` if available or a sensible fallback.
+
+        The second case is what lets us self-correct after an HA restart
+        with a stuck HomGar cache (wkstate=33 long after the valve
+        actually stopped — the phone app sees fresh state via MQTT push,
+        our HTTP polling doesn't always). Without an anchor the switch
+        would otherwise stay "on" indefinitely. If the anchor overshoots
+        a real mid-run restart, the eventual cache update to wkstate=0
+        cleanly transitions us to idle and pops ``runs_until`` via the
+        ``else`` branch below.
 
         If the coordinator already has a ``runs_until`` for this key
         (e.g. stamped by an HA-initiated optimistic update), we leave
@@ -231,12 +241,11 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
         prev = self._prev_running.get(key)
         is_running = port.running
         if is_running:
-            if (
-                prev is False
-                and key not in self._runs_until
-                and port.duration_s
-            ):
+            if prev is False and key not in self._runs_until and port.duration_s:
                 self._runs_until[key] = now + timedelta(seconds=int(port.duration_s))
+            elif prev is None and key not in self._runs_until:
+                anchor_s = int(port.duration_s) if port.duration_s else _STARTUP_RUNNING_ANCHOR_S
+                self._runs_until[key] = now + timedelta(seconds=anchor_s)
         else:
             self._runs_until.pop(key, None)
         # Cooldown only fires for transitions we actually *observed* —
@@ -319,6 +328,12 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
                     "rejected with HomGar code 4 (device-busy)",
                     sub.sid, port, mode, duration,
                 )
+                # Pop the optimistic grace — otherwise it would keep
+                # pinning the just-commanded wkstate for another 30 s
+                # even though the command didn't actually take. With
+                # grace cleared, the next poll reads the cache as-is
+                # and the UI reflects reality.
+                self._grace.pop((getattr(sub, "sid", None), port), None)
                 await self.async_request_refresh()
                 raise HomeAssistantError(
                     "Valve was busy — wait a few seconds and try again."
@@ -358,11 +373,16 @@ class RainPointCoordinator(DataUpdateCoordinator[List[HomgarHubDevice]]):
             self._stale_cache.pop(key, None)
         elif mode == MODE_OFF:
             port.wkstate = 0
-            # Shorter grace for STOP — HomGar either accepts it quickly
-            # or rejects it outright (rate-limit code 4). If rejected,
-            # we'd rather the UI flip back to "running" promptly than
-            # keep lying to the user.
-            self._grace[key] = (now + timedelta(seconds=5), 0)
+            # STOP needs the same 30 s grace as RUN. HomGar's cloud
+            # cache takes 10–20 s to reflect the STOP command; a
+            # shorter grace (we used to use 5 s) expires while the
+            # cache still reports wkstate=33 and the next poll flips
+            # the switch back to "running" for the rest of the
+            # propagation window. Rejections (code 4) clear the
+            # grace explicitly in ``async_control`` so the UI still
+            # snaps back to reality quickly when the command didn't
+            # actually take.
+            self._grace[key] = (now + timedelta(seconds=30), 0)
 
     async def async_turn_on(self, sub, port: int, duration: int) -> None:
         await self.async_control(sub, port, MODE_MANUAL, duration)
