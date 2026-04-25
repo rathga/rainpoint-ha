@@ -221,16 +221,20 @@ decluttering_templates:
                     - border-radius: 14px
                     - border: none
                     - box-shadow: none
-                    - padding: 2px 10px 2px 4px
-                    - margin: 0 8px
+                    - padding: 2px 10px 2px 8px
                     - height: auto
                     - min-height: 0
                     - transition: background 0.15s ease, transform 0.1s ease
                   grid:
                     - grid-template-areas: '"i n"'
-                    - grid-template-columns: auto 1fr
-                    - gap: 2px
+                    - grid-template-columns: 20px 1fr
+                    - grid-template-rows: 20px
+                    - column-gap: 6px
+                    - row-gap: 0
                     - align-items: center
+                  img_cell:
+                    - width: 20px
+                    - height: 20px
                   icon:
                     - width: 20px
                     - height: 20px
@@ -254,6 +258,12 @@ decluttering_templates:
                         - opacity: 0.5
                 card_mod:
                   style: |
+                    ha-card {
+                      background: rgba(76, 175, 80, 0.18) !important;
+                      border-radius: 14px !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                    }
                     ha-card:hover {
                       background: rgba(76, 175, 80, 0.30) !important;
                     }
@@ -274,6 +284,9 @@ decluttering_templates:
                   display: grid !important;
                   grid-template-columns: 1fr auto !important;
                   gap: 8px;
+                  align-items: center;
+                  min-height: 40px;
+                  padding: 8px 0 !important;
                 }
             cards:
               # Running label + countdown on ONE line via a custom:button-card
@@ -313,9 +326,11 @@ decluttering_templates:
                     label:
                       - justify-self: start
                       - font-weight: 500
+                      - font-size: 14px
                       - color: var(--primary-text-color)
                     countdown:
                       - justify-self: start
+                      - font-size: 14px
                       - color: var(--secondary-text-color)
                       - font-variant-numeric: tabular-nums
               - type: custom:button-card
@@ -343,16 +358,20 @@ decluttering_templates:
                     - border-radius: 14px
                     - border: none
                     - box-shadow: none
-                    - padding: 2px 10px 2px 4px
-                    - margin: 0 8px
+                    - padding: 2px 10px 2px 8px
                     - height: auto
                     - min-height: 0
                     - transition: background 0.15s ease, transform 0.1s ease
                   grid:
                     - grid-template-areas: '"i n"'
-                    - grid-template-columns: auto 1fr
-                    - gap: 2px
+                    - grid-template-columns: 20px 1fr
+                    - grid-template-rows: 20px
+                    - column-gap: 6px
+                    - row-gap: 0
                     - align-items: center
+                  img_cell:
+                    - width: 20px
+                    - height: 20px
                   icon:
                     - width: 20px
                     - height: 20px
@@ -376,6 +395,12 @@ decluttering_templates:
                         - opacity: 0.5
                 card_mod:
                   style: |
+                    ha-card {
+                      background: rgba(244, 67, 54, 0.18) !important;
+                      border-radius: 14px !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                    }
                     ha-card:hover {
                       background: rgba(244, 67, 54, 0.30) !important;
                     }
